@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
@@ -13,6 +14,8 @@ except ImportError:  # Keep the deterministic MVP usable without optional config
 
 if load_dotenv is not None:
     load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,7 +82,14 @@ class NvidiaLLMClient:
                 quantity=_optional_quantity(data.get("quantity")),
                 city=_optional_string(data.get("city")),
             )
-        except (HTTPError, URLError, TimeoutError, KeyError, IndexError, ValueError, json.JSONDecodeError):
+        except HTTPError as exc:
+            logger.warning("NVIDIA request failed with HTTP %s", exc.code)
+            return None
+        except URLError as exc:
+            logger.warning("NVIDIA connection failed: %s", exc.reason)
+            return None
+        except (TimeoutError, KeyError, IndexError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("NVIDIA response could not be parsed (%s)", type(exc).__name__)
             return None
 
 
