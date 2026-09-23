@@ -1,4 +1,4 @@
-import type { ChatResponse, Product } from './types';
+import type { BackendCart, ChatResponse, Confirmation, Product } from './types';
 import { catalog } from './demoCatalog';
 
 // Temporary frontend adapter. Set VITE_API_MODE=live after backend integration.
@@ -14,12 +14,16 @@ async function request<T>(path: string, body?: unknown, method = 'POST'): Promis
 }
 
 let session: Promise<string> | undefined;
+async function getSessionId(): Promise<string> {
+  session ??= request<{ session_id: string }>('/api/v1/sessions')
+    .then(response => response.session_id)
+    .catch(error => { session = undefined; throw error; });
+  return session;
+}
+
 export async function sendMessage(message: string): Promise<ChatResponse> {
   if (live) {
-    session ??= request<{ session_id: string }>('/api/v1/sessions')
-      .then(response => response.session_id)
-      .catch(error => { session = undefined; throw error; });
-    const sessionId = await session;
+    const sessionId = await getSessionId();
     const response = await request<{
       answer: string;
       products: Array<Partial<Product> & { id: number; name: string; data_source: 'snapshot' | 'synthetic' }>;
@@ -63,4 +67,24 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
   }
   return { message: answer, products, proposal: null, cart: null, cart_url: null,
     warnings: products.flatMap(product => product.warnings), data_mode: 'demo' };
+}
+
+export async function createConfirmation(product: Product, quantity = 1): Promise<Confirmation> {
+  if (!live) {
+    return { confirmation_id: `demo-${product.id}-${Date.now()}`, items: [{ product_id: String(product.id), quantity, city: 'Алматы', location_id: String(product.stores[0]?.id ?? 'demo') }], expires_at: new Date(Date.now() + 5 * 60_000).toISOString() };
+  }
+  const sessionId = await getSessionId();
+  return request<Confirmation>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/confirmations`, [{ product_id: String(product.id), quantity, city: 'Алматы', location_id: product.stores[0] ? String(product.stores[0].id) : null }]);
+}
+
+export async function confirmConfirmation(confirmationId: string): Promise<BackendCart> {
+  if (!live) return { session_id: 'demo', items: [], cart_url: '#cart' };
+  const sessionId = await getSessionId();
+  return request<BackendCart>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/confirmations/${encodeURIComponent(confirmationId)}/confirm`);
+}
+
+export async function getCart(): Promise<BackendCart> {
+  if (!live) return { session_id: 'demo', items: [], cart_url: '#cart' };
+  const sessionId = await getSessionId();
+  return request<BackendCart>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/cart`, undefined, 'GET');
 }

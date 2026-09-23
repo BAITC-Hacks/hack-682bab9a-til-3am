@@ -16,3 +16,15 @@ export type ChatResponse = {
   cart: Cart | null; cart_url: string | null; warnings: string[];
   data_mode: 'snapshot' | 'demo';
 };
+
+export type Confirmation = {
+  confirmation_id: string;
+  items: { product_id: string; quantity: number; city?: string | null; location_id?: string | null }[];
+  expires_at: string;
+};
+
+export type BackendCart = {
+  session_id: string;
+  items: { product_id: string; quantity: number; city?: string | null; location_id?: string | null }[];
+  cart_url: string;
+};

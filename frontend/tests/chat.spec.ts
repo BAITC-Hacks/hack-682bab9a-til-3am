@@ -53,3 +53,13 @@ test('mobile layout fits screen and search works', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'screenshots/mobile-search.png', fullPage: true });
 });
+
+test('explicit confirmation is required before demo cart changes', async ({ page }) => {
+  await page.goto('/');
+  const card = page.locator('.featured .product').first();
+  await card.getByRole('button', { name: 'Добавить' }).click();
+  await expect(card).toContainText('Добавить 1 шт.?');
+  await expect(page.locator('.cart-panel')).toHaveCount(0);
+  await card.getByRole('button', { name: 'Да, добавить' }).click();
+  await expect(page.locator('.cart-panel')).toContainText('Корзина');
+});
