@@ -395,11 +395,6 @@ def _is_faq_question(text: str) -> bool:
     return any(token in lowered for token in ("оплат", "достав", "гарант", "самовывоз", "минимальн", "партия", "партию", "кратност", "возврат", "условия покупки", "условия заказа", "жеткіз", "төле", "төлем", "ақы", "қайтар", "кепілдік", "ең аз"))
 
 
-def _parse_with_nvidia(text: str):
-    client = NvidiaLLMClient.from_env()
-    return client.parse_request(text) if client is not None else None
-
-
 # Quantities written as words (Russian with a unit, Kazakh collective forms like "екеуін").
 _NUMBER_WORDS = [
     (rf"(?<!\w){word}(?!\w)", value)

@@ -52,7 +52,7 @@ python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```powershell
 cd frontend
 npm install
-"VITE_API_MODE=live" | Out-File -Encoding ascii .env.local   # macOS/Linux: echo VITE_API_MODE=live > .env.local
+Copy-Item .env.example .env.local      # macOS/Linux: cp .env.example .env.local
 npm run dev
 ```
 
@@ -77,7 +77,7 @@ npm run dev
 
 | Симптом | Решение |
 |---|---|
-| Чат отвечает про «DEMO-BREAKER», а не про реальные товары | Не создан `frontend/.env.local` с `VITE_API_MODE=live`. Создайте его и перезапустите `npm run dev` |
+| Чат отвечает про «DEMO-BREAKER», а не про реальные товары | Нет `frontend/.env.local`: выполните `Copy-Item .env.example .env.local` в папке `frontend` и перезапустите `npm run dev` |
 | «Сервер недоступен (404/502)» | Backend не запущен на порту 8000 (шаг 1) |
 | Порт 8000 занят | Закройте предыдущий запуск uvicorn или используйте другой порт и поменяйте его в `frontend/vite.config.ts` |
 | Казахский ответ пришёл на русском | LLM не настроена или бесплатный тариф Gemini перегружен. Ответ всё равно верный: он из данных |
