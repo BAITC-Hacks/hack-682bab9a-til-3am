@@ -22,6 +22,10 @@ python -m pip install -r backend/requirements.txt
 uvicorn app.main:app --app-dir backend --reload
 ```
 
+Для подключения NVIDIA скопируйте `backend/.env.example` в `.env` и заполните
+`NVIDIA_MODEL` и `NVIDIA_API_KEY`. Ключ не добавляйте в Git. Без этих переменных
+backend использует deterministic MVP fallback.
+
 Frontend в отдельном терминале:
 
 ```bash
