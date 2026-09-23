@@ -10,7 +10,7 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "json"
+DATA_DIR = PROJECT_ROOT / "dataset"
 STOP_WORDS = {
     "а", "в", "во", "для", "есть", "и", "из", "или", "как", "мне", "на",
     "найди", "нужен", "нужна", "нужно", "по", "подскажи", "покажи", "пожалуйста",
