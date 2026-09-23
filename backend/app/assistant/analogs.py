@@ -116,7 +116,7 @@ def find_analogs(
             reason += "; совпадает: " + ", ".join(same)
         if diff:
             reason += "; отличается: " + "; ".join(diff)
-        reason += f"; {stock_note}. Совместимость с вашей схемой проверьте по паспорту изделия."
+        reason += f"; {stock_note.rstrip('.')}. Совместимость с вашей схемой проверьте по паспорту изделия."
         scored.append((score, ProductHit(candidate.id, min(score / 14, 0.94), reason, {})))
     scored.sort(key=lambda pair: pair[0], reverse=True)
     return [hit for _, hit in scored[:limit]]
