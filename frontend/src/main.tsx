@@ -54,6 +54,7 @@ function App() {
           expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
         });
       }
+      if (response.backendCart) { setCart(response.backendCart); setPending(null); setTimeout(() => document.getElementById('cart')?.scrollIntoView({ behavior: 'smooth' }), 50); }
       setMessages(previous => [...previous, { role: 'assistant', text: response.message, products: response.products, warnings: response.warnings }]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось получить ответ.'); setFailed(text); }
     finally { setLoading(false); }
@@ -80,9 +81,9 @@ function App() {
       <div className="sidebar-note"><span className="note-icon">↗</span><h3>От вопроса к выбору</h3><p>Найдите товар, сравните характеристики и уточните наличие.</p></div>
       <div className="sidebar-footer"><span className="status-dot"/> {live ? 'Серверный режим' : 'Локальный прототип'}<small>HackAlem · команда ’til 3am</small></div>
     </aside>
-    <main><header><div><span className="breadcrumb">Каталог /</span> AI-консультант</div><span className="mode">{live ? 'API подключается' : 'Демо · без LLM'}</span></header>
+    <main><header><div><span className="breadcrumb">Каталог /</span> AI-консультант</div><span className="mode">{live ? 'Каталог ekt.kz · демокорзина' : 'Демо · без LLM'}</span></header>
       <div className="content"><section className="intro"><span className="eyebrow">МЕНЬШЕ ПОИСКА. БОЛЬШЕ ЯСНОСТИ.</span><h1>Подберём нужное<br/><span>вместе.</span></h1><p>Расскажите, что ищете. Поможем разобраться<br className="desktop-break"/> в электротехнике и найти товар в каталоге.</p></section>
-      <div className="stats"><span><strong>{catalog.length}</strong> демо-товара</span><span><strong>01</strong> карточка с остатками</span><span>Синтетический fixture</span></div>
+      <div className="stats">{live ? <><span><strong>40</strong> товаров из выгрузки ekt.kz</span><span><strong>01</strong> карточка с реальными остатками</span><span>Аналоги и условия — демо-допущения</span></> : <><span><strong>{catalog.length}</strong> демо-товара</span><span>Синтетический каталог</span></>}</div>
       <section className="chat" aria-label="Чат с консультантом"><div className="chat-heading"><div className="avatar">✦</div><div><h2>EKT Assistant</h2><p>Ваш помощник по электротехнике</p></div><span className="chat-badge">BETA</span></div>
         <div className="messages" ref={messagesRef} aria-live="polite" aria-busy={loading}>
           <div className="message assistant"><span className="message-label">EKT ASSISTANT</span><p>Здравствуйте! Укажите название или артикул товара. Я найду его в каталоге и покажу доступные сведения.</p><div className="suggestions">{examples.map(example => <button key={example} disabled={loading} onClick={() => submit(example)}>{example} ↗</button>)}</div></div>
@@ -90,12 +91,12 @@ function App() {
           {loading && <p className="loading" role="status">Ищем ответ…</p>}
           {error && <div className="error" role="alert">{error} <button disabled={loading} onClick={() => failed && submit(failed, true)}>Повторить</button></div>}
         </div>
-        <form onSubmit={event => { event.preventDefault(); void submit(input); }}><label className="sr-only" htmlFor="message">Ваш вопрос</label><input id="message" value={input} onChange={event => setInput(event.target.value)} placeholder="Например: есть ли DEMO-BREAKER-40A?" maxLength={2000}/><button className="send" type="submit" disabled={loading || !input.trim()} aria-label="Отправить сообщение">↑</button></form>
-        <p className="chat-footer">{live ? 'Ответы сервера по каталогу.' : 'Синтетический демонстрационный каталог, без генерации AI.'} Цены в KZT — допущение прототипа.</p>
+        <form onSubmit={event => { event.preventDefault(); void submit(input); }}><label className="sr-only" htmlFor="message">Ваш вопрос</label><input id="message" value={input} onChange={event => setInput(event.target.value)} placeholder={live ? 'Например: есть 027228 в Алматы?' : 'Например: есть ли DEMO-BREAKER-40A?'} maxLength={2000}/><button className="send" type="submit" disabled={loading || !input.trim()} aria-label="Отправить сообщение">↑</button></form>
+        <p className="chat-footer">{live ? 'Цены и наличие — из выгрузки каталога; корзина меняется только после вашего подтверждения («Да, добавить» или «да, добавь»).' : 'Синтетический демонстрационный каталог, без генерации AI.'} Цены в KZT — допущение прототипа.</p>
       </section>
       {cart && <section className="cart-panel" id="cart"><div className="section-title"><h2>Корзина</h2><button className="cart-refresh" onClick={() => void loadCart()}>Обновить</button></div>{cart.items.length ? <ul className="cart-items">{cart.items.map(item => { const known = messages.flatMap(message => message.products ?? []).find(product => String(product.id) === item.product_id); return <li key={item.product_id}>{known?.name ?? `Товар ${item.product_id}`} — {item.quantity} шт.{known ? ` · ${money(known.price * item.quantity)}` : ''}{item.city ? ` · ${item.city}` : ''}</li>; })}</ul> : <p>Корзина пока пуста</p>}<p className="chat-footer">Демокорзина прототипа: заказ не оформляется, товар не резервируется.</p>{cart.cart_url && (cart.cart_url.startsWith('#') ? <a className="cart-link" href={cart.cart_url}>Перейти к корзине ↓</a> : <a className="cart-link" href={cart.cart_url} target="_blank" rel="noreferrer">Открыть корзину ↗</a>)}</section>}
-      {!messages.length && <section className="featured"><div className="section-title"><h2>Демо-каталог</h2><span>Синтетические данные ↙</span></div><div className="featured-grid">{catalog.slice(0, 2).map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}</div></section>}
-      <footer>Данные синтетические и предназначены только для демонстрации. Корзина будет доступна после подключения бэкенда.</footer>
+      {!live && !messages.length && <section className="featured"><div className="section-title"><h2>Демо-каталог</h2><span>Синтетические данные ↙</span></div><div className="featured-grid">{catalog.slice(0, 2).map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}</div></section>}
+      <footer>{live ? 'Прототип HackAlem: каталог — выгрузка ekt.kz (40 товаров); синтетические остатки и условия демомагазина помечены. Корзина демонстрационная, заказ не оформляется, платёжные данные не запрашиваются.' : 'Данные синтетические и предназначены только для демонстрации.'}</footer>
       </div>
     </main>
   </div>;

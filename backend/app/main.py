@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -37,6 +38,12 @@ app.add_middleware(
 
 # Prototype-only session state. Replace with the site's session mechanism or a shared store.
 sessions: dict[str, list[str]] = {}
+# Only the latest proposal per session may be confirmed by text; a new proposal replaces it.
+latest_confirmation: dict[str, str] = {}
+CONFIRM_RE = re.compile(
+    r"^(да|ага|ок|окей|конечно|подтверждаю|добавь|добавьте|добавляй|иә|иа|қос)"
+    r"([\s,!.-]*(да|добавь|добавьте|добавить|добавляй|подтверждаю|в корзину|пожалуйста|иә|қос))*[\s!.]*$"
+)
 inventory = FixtureInventoryRepository(catalog)
 faq = FixtureFAQRepository()
 assistant_handler: AssistantHandler = UnconfiguredAssistant()
@@ -80,12 +87,6 @@ class PendingConfirmationResponse(BaseModel):
     expires_at: datetime
 
 
-class MessageResponse(BaseModel):
-    answer: str
-    products: list[ProductCard]
-    pending_confirmation: PendingConfirmationResponse | None = None
-
-
 class ConfirmationResponse(BaseModel):
     confirmation_id: str
     items: list[CartItemRequest]
@@ -96,6 +97,14 @@ class CartResponse(BaseModel):
     session_id: str
     items: list[CartItemRequest]
     cart_url: str
+
+
+class MessageResponse(BaseModel):
+    answer: str
+    products: list[ProductCard]
+    pending_confirmation: PendingConfirmationResponse | None = None
+    # Filled only when this message was an explicit text confirmation that changed the cart.
+    cart: CartResponse | None = None
 
 
 @app.get("/api/v1/health")
@@ -125,6 +134,9 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     sessions[session_id].append(message)
     # Keep only a small in-memory context window; the first slice searches the current message.
     sessions[session_id] = sessions[session_id][-10:]
+
+    if CONFIRM_RE.match(message.casefold()):
+        return _confirm_by_text(session_id)
 
     assistant_request = AssistantRequest(
         text=message,
@@ -159,6 +171,7 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     if result.action is not None and result.action.type == "add_to_cart":
         try:
             confirmation = cart.create_confirmation(session_id, result.action.items)
+            latest_confirmation[session_id] = confirmation.confirmation_id
             pending_confirmation = PendingConfirmationResponse(
                 confirmation_id=confirmation.confirmation_id,
                 items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
@@ -177,6 +190,45 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     )
 
 
+def _cart_response(result) -> CartResponse:
+    return CartResponse(
+        session_id=result.session_id,
+        items=[CartItemRequest(**item.__dict__) for item in result.items],
+        cart_url=result.cart_url or "",
+    )
+
+
+def _confirm_by_text(session_id: str) -> MessageResponse:
+    """Explicit text confirmation ("да, добавь") uses the same server-side check as the button."""
+    confirmation_id = latest_confirmation.pop(session_id, None)
+    if confirmation_id is None:
+        return MessageResponse(
+            answer="Сейчас нет предложения, которое нужно подтвердить. Напишите, какой товар и сколько штук добавить.",
+            products=[],
+        )
+    try:
+        result = cart.confirm(session_id, confirmation_id)
+    except CartError as error:
+        return MessageResponse(
+            answer=f"Не удалось добавить: {str(error).rstrip('.')}. Корзина не изменилась — запросите товар ещё раз.",
+            products=[],
+        )
+    lines = []
+    total = 0
+    for item in result.items:
+        product = catalog.find_by_id(item.product_id)
+        name = product.name if product else f"Товар {item.product_id}"
+        price = product.price if product and product.price is not None else None
+        if price is not None:
+            total += price * item.quantity
+        lines.append(f"• {name} — {item.quantity} шт." + (f" ({item.city})" if item.city else ""))
+    answer = "Готово, добавил в корзину. Сейчас в корзине:\n" + "\n".join(lines)
+    if total:
+        answer += f"\nИтого: {int(total):,} ₸".replace(",", " ")
+    answer += "\nПерейдите к корзине по ссылке ниже, чтобы оформить заказ."
+    return MessageResponse(answer=answer, products=[], cart=_cart_response(result))
+
+
 @app.post(
     "/api/v1/sessions/{session_id}/confirmations",
     response_model=ConfirmationResponse,
@@ -191,6 +243,7 @@ def create_confirmation(session_id: str, request: list[CartItemRequest]) -> Conf
         )
     except CartError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    latest_confirmation[session_id] = confirmation.confirmation_id
     return ConfirmationResponse(
         confirmation_id=confirmation.confirmation_id,
         items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
@@ -209,6 +262,8 @@ def confirm_cart(session_id: str, confirmation_id: str) -> CartResponse:
         result = cart.confirm(session_id, confirmation_id)
     except CartError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    if latest_confirmation.get(session_id) == confirmation_id:
+        latest_confirmation.pop(session_id)
     return CartResponse(
         session_id=result.session_id,
         items=[CartItemRequest(**item.__dict__) for item in result.items],

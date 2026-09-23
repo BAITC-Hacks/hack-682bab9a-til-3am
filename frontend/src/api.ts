@@ -32,6 +32,7 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
       answer: string;
       products: Array<Partial<Product> & { id: number; name: string; data_source: 'snapshot' | 'synthetic' }>;
       pending_confirmation: null | { confirmation_id: string; items: Array<{ product_id: string; quantity: number; city?: string | null; location_id?: string | null }> };
+      cart?: BackendCart | null;
     }>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { message });
     let response;
     try {
@@ -63,7 +64,8 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
         total: Number(response.products.find(product => String(product.id) === response.pending_confirmation?.items[0]?.product_id)?.price ?? 0) * (response.pending_confirmation.items[0]?.quantity ?? 1),
       } : null,
       cart: null,
-      cart_url: null,
+      backendCart: response.cart ?? null,
+      cart_url: response.cart?.cart_url ?? null,
       warnings: response.products.flatMap(product => product.warnings ?? []),
       data_mode: response.products.some(product => product.data_source === 'synthetic') ? 'demo' : 'snapshot',
     };

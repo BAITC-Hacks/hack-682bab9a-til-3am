@@ -13,7 +13,7 @@ export type Cart = {
 export type ChatResponse = {
   message: string; products: Product[];
   proposal: null | { id: string; product_id: number; quantity: number; store_id: number; unit_price: number; total: number };
-  cart: Cart | null; cart_url: string | null; warnings: string[];
+  cart: Cart | null; backendCart?: BackendCart | null; cart_url: string | null; warnings: string[];
   data_mode: 'snapshot' | 'demo';
 };
 
