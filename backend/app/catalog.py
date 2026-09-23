@@ -18,6 +18,9 @@ STOP_WORDS = {
     "найди", "нужен", "нужна", "нужно", "по", "подскажи", "покажи", "пожалуйста",
     "сколько", "товар", "товара", "цена", "цену", "что", "это", "этот", "эта",
 }
+ATTRIBUTE_LABELS = {
+    "NOMINALNYY_TOK": "номинальный ток",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -153,7 +156,7 @@ class Catalog:
             "quantity": None,
             "stores": [],
             "warnings": [
-                f"Конфликт характеристики: {key}"
+                f"Конфликт характеристики: {ATTRIBUTE_LABELS.get(key, key)}"
                 for key, attribute in product.attributes.items()
                 if attribute.status == "conflict"
             ],

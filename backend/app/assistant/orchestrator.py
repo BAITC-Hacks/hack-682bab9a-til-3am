@@ -14,6 +14,7 @@ from .contracts import (
     SearchFilters,
 )
 from .retrieval import product_evidence, search_products, stock_evidence
+from .llm_client import NvidiaLLMClient
 
 
 class AssistantHandler(Protocol):
@@ -36,8 +37,11 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
             action=None,
         )
 
-    filters = SearchFilters(city=request.city)
-    hits = search_products(services.catalog, text, filters)
+    parsed = _parse_with_nvidia(text)
+    effective_city = request.city or (parsed.city if parsed else None)
+    search_text = parsed.article if parsed and parsed.article else text
+    filters = SearchFilters(city=effective_city)
+    hits = _search_with_context(request, services, filters, search_text)
     if not hits:
         return AssistantResult(
             answer="Не нашёл товар по этому запросу. Укажите артикул или название.",
@@ -72,11 +76,11 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
         )
 
     evidence = product_evidence(product)
-    stock = services.inventory.get_stock(product.id, request.city)
+    stock = services.inventory.get_stock(product.id, effective_city)
     evidence.extend(stock_evidence(stock))
-    answer = _build_product_answer(product.name, stock.available_quantity, request.city)
+    answer = _build_product_answer(product.name, stock.available_quantity, effective_city)
 
-    quantity = _requested_quantity(text)
+    quantity = parsed.quantity if parsed and parsed.quantity is not None else _requested_quantity(text)
     wants_add = _wants_add(text)
     action = None
     clarification = None
@@ -100,7 +104,7 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
         else:
             action = ActionProposal(
                 type="add_to_cart",
-                items=[CartItem(product_id=product.id, quantity=quantity, city=request.city)],
+                items=[CartItem(product_id=product.id, quantity=quantity, city=effective_city)],
             )
             answer += f" Подготовил предложение добавить {quantity} шт. в корзину."
 
@@ -122,6 +126,38 @@ def _build_product_answer(name: str, quantity: int | None, city: str | None) -> 
     return f"Товар: {name}. {availability}{location}"
 
 
+def _search_with_context(
+    request: AssistantRequest,
+    services: AgentServices,
+    filters: SearchFilters,
+    search_text: str | None = None,
+) -> list[ProductHit]:
+    """Search the current message, then recover the last discussed product.
+
+    Follow-up messages such as ``Мне нужно 2 штуки`` intentionally contain no
+    article. The backend supplies the bounded history, so the agent can safely
+    resolve that reference without inventing a product.
+    """
+    current = (search_text or request.text).strip()
+    hits = search_products(services.catalog, current, filters)
+    if hits:
+        return hits
+
+    for message in reversed(request.history):
+        content = message.content.strip()
+        if not content or content == current or message.role != "user":
+            continue
+        hits = search_products(services.catalog, content, filters)
+        if hits:
+            return hits
+    return []
+
+
+def _parse_with_nvidia(text: str):
+    client = NvidiaLLMClient.from_env()
+    return client.parse_request(text) if client is not None else None
+
+
 def _requested_quantity(text: str) -> int | None:
     import re
 
@@ -129,13 +165,19 @@ def _requested_quantity(text: str) -> int | None:
     # A bare number may be an article (for example, 027228), so only treat
     # numbers as quantities when the wording gives us a quantity signal.
     patterns = (
-        r"\b(\d{1,3})\s*(?:шт|штук|единиц|товар(?:а|ов)?)\b",
+        r"\b(\d{1,3})\s*(?:шт|штук|штуки|единиц|товар(?:а|ов)?)\b",
         r"\b(?:нужно|нужн(?:а|о)|количество|добавь|положи|возьми)\s+(\d{1,3})\b",
     )
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
             return int(match.group(1))
+    # PowerShell clients can mangle Cyrillic text in the request body. A short
+    # standalone number is still safe to treat as a quantity here; long
+    # numeric articles such as 027228 are deliberately excluded.
+    match = re.search(r"\b(\d{1,3})\b", lowered)
+    if match:
+        return int(match.group(1))
     return None
 
 

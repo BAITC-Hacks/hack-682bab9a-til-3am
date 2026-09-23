@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -16,6 +17,8 @@ from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant
 from app.cart.adapter import CartError, MockCartAdapter
 from app.faq import FixtureFAQRepository
 from app.inventory import FixtureInventoryRepository
+
+load_dotenv()
 
 
 app = FastAPI(title="ekt.kz Chat Assistant API", version="0.1.0")
