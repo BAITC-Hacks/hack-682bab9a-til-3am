@@ -9,7 +9,11 @@ async function request<T>(path: string, body?: unknown, method = 'POST'): Promis
   const response = await fetch(path, { method, credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body) });
-  if (!response.ok) throw new Error(`Сервер недоступен или отклонил запрос (${response.status}). Попробуйте ещё раз.`);
+  if (!response.ok) {
+    const error = new Error(`Сервер недоступен или отклонил запрос (${response.status}). Попробуйте ещё раз.`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -23,12 +27,19 @@ async function getSessionId(): Promise<string> {
 
 export async function sendMessage(message: string): Promise<ChatResponse> {
   if (live) {
-    const sessionId = await getSessionId();
-    const response = await request<{
+    const postMessage = (sessionId: string) => request<{
       answer: string;
       products: Array<Partial<Product> & { id: number; name: string; data_source: 'snapshot' | 'synthetic' }>;
       pending_confirmation: null | { confirmation_id: string; items: Array<{ product_id: string; quantity: number; city?: string | null; location_id?: string | null }> };
     }>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { message });
+    let response;
+    try {
+      response = await postMessage(await getSessionId());
+    } catch (error) {
+      if ((error as Error & { status?: number }).status !== 404) throw error;
+      session = undefined;
+      response = await postMessage(await getSessionId());
+    }
     return {
       message: response.answer,
       products: response.products.map(product => ({
