@@ -2,9 +2,9 @@ export type Product = {
   id: number; article: string; name: string; price: number;
   currency: string; image: string | null; url: string | null;
   quantity: number | null;
-  stores: { id: number; name: string; quantity: number }[];
+  stores: { id: number | string; name: string; quantity: number }[];
   description: string | null; properties: Record<string, unknown>;
-  data_source: 'snapshot' | 'synthetic'; warnings: string[];
+  data_source: 'snapshot' | 'synthetic'; warnings: string[]; match_reason?: string;
 };
 export type Cart = {
   items: { product_id: number; name: string; quantity: number; store_id: number; unit_price: number; total: number }[];

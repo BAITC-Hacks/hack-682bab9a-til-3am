@@ -5,19 +5,45 @@ import { catalog } from './demoCatalog';
 export const live = import.meta.env.VITE_API_MODE === 'live';
 export { catalog };
 
-async function request<T>(path: string, body: object): Promise<T> {
-  const response = await fetch(path, { method: 'POST', credentials: 'include',
-    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function request<T>(path: string, body?: unknown, method = 'POST'): Promise<T> {
+  const response = await fetch(path, { method, credentials: 'include',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body) });
   if (!response.ok) throw new Error(`Сервер недоступен или отклонил запрос (${response.status}). Попробуйте ещё раз.`);
   return response.json();
 }
 
-let session: Promise<unknown> | undefined;
+let session: Promise<string> | undefined;
 export async function sendMessage(message: string): Promise<ChatResponse> {
   if (live) {
-    session ??= request('/api/session', {}).catch(error => { session = undefined; throw error; });
-    await session;
-    return request<ChatResponse>('/api/chat', { message });
+    session ??= request<{ session_id: string }>('/api/v1/sessions')
+      .then(response => response.session_id)
+      .catch(error => { session = undefined; throw error; });
+    const sessionId = await session;
+    const response = await request<{
+      answer: string;
+      products: Array<Partial<Product> & { id: number; name: string; data_source: 'snapshot' | 'synthetic' }>;
+      pending_confirmation: null | { confirmation_id: string };
+    }>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { message });
+    return {
+      message: response.answer,
+      products: response.products.map(product => ({
+        ...product,
+        currency: product.currency ?? 'KZT',
+        image: product.image ?? null,
+        url: product.url ?? null,
+        quantity: product.quantity ?? null,
+        stores: product.stores ?? [],
+        description: product.description ?? null,
+        properties: product.properties ?? {},
+        warnings: product.warnings ?? [],
+      } as Product)),
+      proposal: null,
+      cart: null,
+      cart_url: null,
+      warnings: response.products.flatMap(product => product.warnings ?? []),
+      data_mode: response.products.some(product => product.data_source === 'synthetic') ? 'demo' : 'snapshot',
+    };
   }
   const query = message.toLowerCase().trim();
   const words = query.match(/[\p{L}\p{N}_-]+/gu)?.filter(word => word.length > 2) ?? [];
