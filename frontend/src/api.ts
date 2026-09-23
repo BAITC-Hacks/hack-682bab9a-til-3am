@@ -27,7 +27,7 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
     const response = await request<{
       answer: string;
       products: Array<Partial<Product> & { id: number; name: string; data_source: 'snapshot' | 'synthetic' }>;
-      pending_confirmation: null | { confirmation_id: string };
+      pending_confirmation: null | { confirmation_id: string; items: Array<{ product_id: string; quantity: number; city?: string | null; location_id?: string | null }> };
     }>(`/api/v1/sessions/${encodeURIComponent(sessionId)}/messages`, { message });
     return {
       message: response.answer,
@@ -42,7 +42,14 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
         properties: product.properties ?? {},
         warnings: product.warnings ?? [],
       } as Product)),
-      proposal: null,
+      proposal: response.pending_confirmation ? {
+        id: response.pending_confirmation.confirmation_id,
+        product_id: Number(response.pending_confirmation.items[0]?.product_id ?? 0),
+        quantity: response.pending_confirmation.items[0]?.quantity ?? 1,
+        store_id: Number(response.pending_confirmation.items[0]?.location_id ?? 0),
+        unit_price: Number(response.products.find(product => String(product.id) === response.pending_confirmation?.items[0]?.product_id)?.price ?? 0),
+        total: Number(response.products.find(product => String(product.id) === response.pending_confirmation?.items[0]?.product_id)?.price ?? 0) * (response.pending_confirmation.items[0]?.quantity ?? 1),
+      } : null,
       cart: null,
       cart_url: null,
       warnings: response.products.flatMap(product => product.warnings ?? []),

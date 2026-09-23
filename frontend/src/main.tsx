@@ -45,6 +45,13 @@ function App() {
     if (!retry) setMessages(previous => [...previous, { role: 'user', text }]);
     try {
       const response = await sendMessage(text);
+      if (response.proposal) {
+        setPending({
+          confirmation_id: response.proposal.id,
+          items: [{ product_id: String(response.proposal.product_id), quantity: response.proposal.quantity, location_id: String(response.proposal.store_id) }],
+          expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+        });
+      }
       setMessages(previous => [...previous, { role: 'assistant', text: response.message, products: response.products, warnings: response.warnings }]);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось получить ответ.'); setFailed(text); }
     finally { setLoading(false); }
