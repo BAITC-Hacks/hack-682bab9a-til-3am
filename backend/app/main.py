@@ -11,8 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.catalog import catalog
-from app.assistant.contracts import AgentServices, AssistantRequest, Message
+from app.assistant.contracts import AgentServices, AssistantRequest, CartItem, Message
 from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant
+from app.cart.adapter import CartError, MockCartAdapter
 from app.faq import FixtureFAQRepository
 from app.inventory import FixtureInventoryRepository
 
@@ -37,6 +38,7 @@ inventory = FixtureInventoryRepository(catalog)
 faq = FixtureFAQRepository()
 assistant_handler: AssistantHandler = UnconfiguredAssistant()
 agent_services = AgentServices(catalog=catalog, inventory=inventory, faq=faq)
+cart = MockCartAdapter(catalog, inventory)
 
 
 class CreateSessionResponse(BaseModel):
@@ -66,6 +68,25 @@ class MessageResponse(BaseModel):
     answer: str
     products: list[ProductCard]
     pending_confirmation: None = None
+
+
+class CartItemRequest(BaseModel):
+    product_id: str
+    quantity: int = Field(gt=0)
+    city: str | None = None
+    location_id: str | None = None
+
+
+class ConfirmationResponse(BaseModel):
+    confirmation_id: str
+    items: list[CartItemRequest]
+    expires_at: datetime
+
+
+class CartResponse(BaseModel):
+    session_id: str
+    items: list[CartItemRequest]
+    cart_url: str
 
 
 @app.get("/api/v1/health")
@@ -122,3 +143,54 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
         ]
         cards.append(card)
     return MessageResponse(answer=result.answer, products=cards)
+
+
+@app.post(
+    "/api/v1/sessions/{session_id}/confirmations",
+    response_model=ConfirmationResponse,
+)
+def create_confirmation(session_id: str, request: list[CartItemRequest]) -> ConfirmationResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    try:
+        confirmation = cart.create_confirmation(
+            session_id,
+            [CartItem(**item.model_dump()) for item in request],
+        )
+    except CartError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ConfirmationResponse(
+        confirmation_id=confirmation.confirmation_id,
+        items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
+        expires_at=confirmation.expires_at,
+    )
+
+
+@app.post(
+    "/api/v1/sessions/{session_id}/confirmations/{confirmation_id}/confirm",
+    response_model=CartResponse,
+)
+def confirm_cart(session_id: str, confirmation_id: str) -> CartResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    try:
+        result = cart.confirm(session_id, confirmation_id)
+    except CartError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return CartResponse(
+        session_id=result.session_id,
+        items=[CartItemRequest(**item.__dict__) for item in result.items],
+        cart_url=result.cart_url or "",
+    )
+
+
+@app.get("/api/v1/sessions/{session_id}/cart", response_model=CartResponse)
+def get_cart(session_id: str) -> CartResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    result = cart.get_cart(session_id)
+    return CartResponse(
+        session_id=result.session_id,
+        items=[CartItemRequest(**item.__dict__) for item in result.items],
+        cart_url=result.cart_url or "",
+    )
