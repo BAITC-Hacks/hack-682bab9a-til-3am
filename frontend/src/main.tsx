@@ -8,6 +8,7 @@ import './cart.css';
 type Message = { role: 'user' | 'assistant'; text: string; products?: Product[]; warnings?: string[] };
 const examples = ['DEMO-BREAKER-40A в Алматы', 'Автомат 40А', 'Реле RM17'];
 const money = (value: number) => new Intl.NumberFormat('ru-KZ').format(value) + ' ₸';
+const warningText = (warning: string) => warning.replace('NOMINALNYY_TOK', 'номинальный ток');
 
 function ProductCard({ product, onPrepare, pending, onConfirm, confirming }: { product: Product; onPrepare: (product: Product) => void; pending: Confirmation | null; onConfirm: () => void; confirming: boolean }) {
   const [broken, setBroken] = useState(false);
@@ -84,7 +85,7 @@ function App() {
       <section className="chat" aria-label="Чат с консультантом"><div className="chat-heading"><div className="avatar">✦</div><div><h2>EKT Assistant</h2><p>Ваш помощник по электротехнике</p></div><span className="chat-badge">BETA</span></div>
         <div className="messages" ref={messagesRef} aria-live="polite" aria-busy={loading}>
           <div className="message assistant"><span className="message-label">EKT ASSISTANT</span><p>Здравствуйте! Укажите название или артикул товара. Я найду его в каталоге и покажу доступные сведения.</p><div className="suggestions">{examples.map(example => <button key={example} disabled={loading} onClick={() => submit(example)}>{example} ↗</button>)}</div></div>
-          {messages.map((message, index) => <div className={`message ${message.role}`} key={index}><span className="message-label">{message.role === 'user' ? 'ВЫ' : 'EKT ASSISTANT'}</span><p>{message.text}</p>{message.products?.map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}{message.warnings?.map(warning => <p className="warning" key={warning}>{warning}</p>)}</div>)}
+          {messages.map((message, index) => <div className={`message ${message.role}`} key={index}><span className="message-label">{message.role === 'user' ? 'ВЫ' : 'EKT ASSISTANT'}</span><p>{message.text}</p>{message.products?.map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}{message.warnings?.map(warning => <p className="warning" key={warning}>{warningText(warning)}</p>)}</div>)}
           {loading && <p className="loading" role="status">Ищем ответ…</p>}
           {error && <div className="error" role="alert">{error} <button disabled={loading} onClick={() => failed && submit(failed, true)}>Повторить</button></div>}
         </div>
