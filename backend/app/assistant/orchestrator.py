@@ -37,7 +37,7 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
         )
 
     filters = SearchFilters(city=request.city)
-    hits = search_products(services.catalog, text, filters)
+    hits = _search_with_context(request, services, filters)
     if not hits:
         return AssistantResult(
             answer="Не нашёл товар по этому запросу. Укажите артикул или название.",
@@ -120,6 +120,28 @@ def _build_product_answer(name: str, quantity: int | None, city: str | None) -> 
     else:
         availability = f"Доступно: {quantity} шт."
     return f"Товар: {name}. {availability}{location}"
+
+
+def _search_with_context(request: AssistantRequest, services: AgentServices, filters: SearchFilters) -> list[ProductHit]:
+    """Search the current message, then recover the last discussed product.
+
+    Follow-up messages such as ``Мне нужно 2 штуки`` intentionally contain no
+    article. The backend supplies the bounded history, so the agent can safely
+    resolve that reference without inventing a product.
+    """
+    current = request.text.strip()
+    hits = search_products(services.catalog, current, filters)
+    if hits:
+        return hits
+
+    for message in reversed(request.history):
+        content = message.content.strip()
+        if not content or content == current or message.role != "user":
+            continue
+        hits = search_products(services.catalog, content, filters)
+        if hits:
+            return hits
+    return []
 
 
 def _requested_quantity(text: str) -> int | None:
