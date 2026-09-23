@@ -10,7 +10,8 @@ async function request<T>(path: string, body?: unknown, method = 'POST'): Promis
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body) });
   if (!response.ok) {
-    const error = new Error(`Сервер недоступен или отклонил запрос (${response.status}). Попробуйте ещё раз.`) as Error & { status?: number };
+    const detail = await response.json().then(body => typeof body?.detail === 'string' ? body.detail : null).catch(() => null);
+    const error = new Error(detail ?? `Сервер недоступен или отклонил запрос (${response.status}). Попробуйте ещё раз.`) as Error & { status?: number };
     error.status = response.status;
     throw error;
   }

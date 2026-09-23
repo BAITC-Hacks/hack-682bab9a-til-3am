@@ -44,14 +44,18 @@ def search_products(
         for product in products:
             article = product.article or ""
             exact_article = article.casefold() == candidate.casefold()
+            # Word-level fuzzy matches are noisy ("автомат" matches every breaker);
+            # keep only exact identifiers here and rank fuzzy matches on the whole phrase below.
+            if not exact_article and not _contains_identifier(product, candidate):
+                continue
             hits.append(
                 ProductHit(
                     product_id=product.id,
-                    score=0.95 if exact_article else 0.7,
+                    score=0.95,
                     reason=(
                         "Точное совпадение по артикулу"
                         if exact_article
-                        else "Совпадение по названию или атрибутам"
+                        else "Совпадение по коду производителя в названии"
                     ),
                     matched_attributes={"article": article} if exact_article else {},
                 )
@@ -73,6 +77,13 @@ def search_products(
         if hit.product_id not in unique or hit.score > unique[hit.product_id].score:
             unique[hit.product_id] = hit
     return sorted(unique.values(), key=lambda hit: hit.score, reverse=True)
+
+
+def _contains_identifier(product: Product, candidate: str) -> bool:
+    """True when a code-like candidate (027228, RM17UAS16) appears in the product name."""
+    if len(candidate) < 5 or not any(character.isdigit() for character in candidate):
+        return False
+    return candidate.casefold() in product.name.casefold().split()
 
 
 def stock_evidence(stock: StockInfo) -> list[Evidence]:

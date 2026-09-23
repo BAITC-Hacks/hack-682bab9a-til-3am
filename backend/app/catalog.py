@@ -20,6 +20,24 @@ STOP_WORDS = {
 }
 ATTRIBUTE_LABELS = {
     "NOMINALNYY_TOK": "номинальный ток",
+    "OBYEM": "тип",
+    "KOLICHESTVO_POLYUSOV": "число полюсов",
+    "NOMINALNAYA_OTKLYUCHAYUSHCHAYA_SPOSOBNOST": "отключающая способность",
+    "NOMINALNOE_NAPRYAZHENIE": "номинальное напряжение",
+    "TIP_USTANOVKI": "тип установки",
+    "TORGOVAYA_MARKA": "бренд",
+    "ARTIKULPOSTAVSHCHIKA": "артикул производителя",
+    "KRATNOST_MIN": "минимальная кратность",
+}
+# Customers say "автомат"/"автоматический выключатель", names use the abbreviation "АВ".
+SYNONYMS = {
+    "автомат": {"ав"},
+    "автоматы": {"ав"},
+    "автоматический": {"ав"},
+    "выключатель": {"ав"},
+    "светильник": {"led"},
+    "коробка": {"коробка"},
+    "распаечная": {"распаячная"},
 }
 
 
@@ -64,6 +82,10 @@ class Catalog:
     def _search_raw(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
         query_normalized = _normalize(query)
         query_tokens = _tokens(query)
+        for token in list(query_tokens):
+            query_tokens |= SYNONYMS.get(token, set())
+        # Names write current as "160А"; accept "160 А", "160a", "160 ампер".
+        query_tokens |= {f"{value}а" for value in re.findall(r"(\d{2,3})\s*(?:а|a|ампер)\b", query.casefold())}
         if not query_normalized and not query_tokens:
             return []
 
@@ -99,6 +121,10 @@ class Catalog:
             ranked.append((rank, product))
 
         ranked.sort(key=lambda pair: pair[0])
+        if ranked and ranked[0][0][0] == 2:
+            # Fuzzy matches: keep only products with the best word overlap.
+            best = ranked[0][0][1]
+            ranked = [pair for pair in ranked if pair[0][1] == best]
         return [product for _, product in ranked[:limit]]
 
     def _to_product(self, product: dict[str, Any]) -> Product:
@@ -133,6 +159,9 @@ class Catalog:
         product_id = str(product_id)
         product = next((item for item in self.products if str(item.get("id")) == product_id), None)
         return self._to_product(product) if product else None
+
+    def all_products(self) -> list[Product]:
+        return [self._to_product(item) for item in self.products]
 
     def search(self, query: str, filters: SearchFilters | None = None) -> list[Product]:
         filters = filters or SearchFilters()

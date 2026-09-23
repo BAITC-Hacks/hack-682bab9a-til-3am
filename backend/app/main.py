@@ -142,6 +142,9 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
         card = catalog.product_card(product)
         card["match_reason"] = hit.reason
         card["quantity"] = stock.available_quantity
+        if stock.source == "synthetic":
+            card["data_source"] = "synthetic"
+            card["warnings"].append("Остаток синтетический (демо-сценарий аналога), не данные ekt.kz")
         card["stores"] = [
             {
                 "id": location.location_id,

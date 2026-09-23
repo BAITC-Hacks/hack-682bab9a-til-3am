@@ -1,0 +1,31 @@
+{
+  "_note": "SYNTHETIC demo stock. Not an ekt.kz export. Used only for products without a detail fixture to demonstrate the out-of-stock -> analog scenario.",
+  "products": {
+    "515288": {
+      "quantity": 0,
+      "stores": [
+        {"id": 13, "name": "Алматы", "quantity": 0},
+        {"id": 24, "name": "Нур-Султан", "quantity": 0}
+      ]
+    },
+    "515286": {
+      "quantity": 4,
+      "stores": [
+        {"id": 13, "name": "Алматы", "quantity": 1},
+        {"id": 24, "name": "Нур-Султан", "quantity": 3}
+      ]
+    },
+    "35819": {
+      "quantity": 0,
+      "stores": [
+        {"id": 13, "name": "Алматы", "quantity": 0}
+      ]
+    },
+    "35587": {
+      "quantity": 6,
+      "stores": [
+        {"id": 13, "name": "Алматы", "quantity": 6}
+      ]
+    }
+  }
+}

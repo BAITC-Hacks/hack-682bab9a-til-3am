@@ -6,7 +6,7 @@ import './style.css';
 import './cart.css';
 
 type Message = { role: 'user' | 'assistant'; text: string; products?: Product[]; warnings?: string[] };
-const examples = ['DEMO-BREAKER-40A в Алматы', 'Автомат 40А', 'Реле RM17'];
+const examples = live ? ['Есть 027228 в Алматы?', 'Нужен 027230, есть в наличии?', 'Условия доставки и оплаты?'] : ['DEMO-BREAKER-40A в Алматы', 'Автомат 40А', 'Реле RM17'];
 const money = (value: number) => new Intl.NumberFormat('ru-KZ').format(value) + ' ₸';
 const warningText = (warning: string) => warning.replace('NOMINALNYY_TOK', 'номинальный ток');
 
@@ -17,10 +17,11 @@ function ProductCard({ product, onPrepare, pending, onConfirm, confirming }: { p
   return <article className="product">
     <div className="product-image">{product.image && !broken ? <img src={product.image} alt={product.name} onError={() => setBroken(true)} /> : <span>Нет фото</span>}</div>
     <div className="product-info"><span className="article">Арт. {product.article}</span><h3>{product.name}</h3>
-      <p className="stock">{product.quantity === null ? 'Наличие не уточнено' : `${product.quantity} шт. в демо`}</p>
+      <p className="stock">{product.quantity === null ? 'Наличие не уточнено' : product.quantity === 0 ? 'Нет в наличии' : `${product.quantity} шт.${product.data_source === 'synthetic' ? ' (демо)' : ' по выгрузке'}`}</p>
+      {product.match_reason?.startsWith('Аналог') && <p className="match-reason" style={{ fontSize: '0.85em', opacity: 0.8 }}>{product.match_reason}</p>}
       <div className="product-bottom"><strong>{money(product.price)}</strong>{product.url && <a href={product.url} target="_blank" rel="noreferrer">На сайт ↗</a>}</div>
       {available && !isPending && <button className="product-action" onClick={() => onPrepare(product)}>Добавить</button>}
-      {isPending && <div className="confirm-box"><span>Добавить 1 шт.?</span><button className="product-action confirm" disabled={confirming} onClick={onConfirm}>{confirming ? 'Добавляем…' : 'Да, добавить'}</button></div>}
+      {isPending && <div className="confirm-box"><span>Добавить {pending?.items.find(item => item.product_id === String(product.id))?.quantity ?? 1} шт.?</span><button className="product-action confirm" disabled={confirming} onClick={onConfirm}>{confirming ? 'Добавляем…' : 'Да, добавить'}</button></div>}
       {!available && <span className="unavailable">Добавление недоступно</span>}
     </div>
   </article>;
@@ -65,7 +66,7 @@ function App() {
   async function confirm() {
     if (!pending) return;
     setConfirming(true); setError('');
-    try { setCart(await confirmConfirmation(pending.confirmation_id)); setPending(null); }
+    try { setCart(await confirmConfirmation(pending.confirmation_id)); setPending(null); setTimeout(() => document.getElementById('cart')?.scrollIntoView({ behavior: 'smooth' }), 50); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось обновить корзину.'); }
     finally { setConfirming(false); }
   }
@@ -85,14 +86,14 @@ function App() {
       <section className="chat" aria-label="Чат с консультантом"><div className="chat-heading"><div className="avatar">✦</div><div><h2>EKT Assistant</h2><p>Ваш помощник по электротехнике</p></div><span className="chat-badge">BETA</span></div>
         <div className="messages" ref={messagesRef} aria-live="polite" aria-busy={loading}>
           <div className="message assistant"><span className="message-label">EKT ASSISTANT</span><p>Здравствуйте! Укажите название или артикул товара. Я найду его в каталоге и покажу доступные сведения.</p><div className="suggestions">{examples.map(example => <button key={example} disabled={loading} onClick={() => submit(example)}>{example} ↗</button>)}</div></div>
-          {messages.map((message, index) => <div className={`message ${message.role}`} key={index}><span className="message-label">{message.role === 'user' ? 'ВЫ' : 'EKT ASSISTANT'}</span><p>{message.text}</p>{message.products?.map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}{message.warnings?.map(warning => <p className="warning" key={warning}>{warningText(warning)}</p>)}</div>)}
+          {messages.map((message, index) => <div className={`message ${message.role}`} key={index}><span className="message-label">{message.role === 'user' ? 'ВЫ' : 'EKT ASSISTANT'}</span><p style={{ whiteSpace: 'pre-line' }}>{message.text}</p>{message.products?.map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}{[...new Set(message.warnings ?? [])].map(warning => <p className="warning" key={warning}>{warningText(warning)}</p>)}</div>)}
           {loading && <p className="loading" role="status">Ищем ответ…</p>}
           {error && <div className="error" role="alert">{error} <button disabled={loading} onClick={() => failed && submit(failed, true)}>Повторить</button></div>}
         </div>
         <form onSubmit={event => { event.preventDefault(); void submit(input); }}><label className="sr-only" htmlFor="message">Ваш вопрос</label><input id="message" value={input} onChange={event => setInput(event.target.value)} placeholder="Например: есть ли DEMO-BREAKER-40A?" maxLength={2000}/><button className="send" type="submit" disabled={loading || !input.trim()} aria-label="Отправить сообщение">↑</button></form>
         <p className="chat-footer">{live ? 'Ответы сервера по каталогу.' : 'Синтетический демонстрационный каталог, без генерации AI.'} Цены в KZT — допущение прототипа.</p>
       </section>
-      {cart && <section className="cart-panel"><div className="section-title"><h2>Корзина</h2><button className="cart-refresh" onClick={() => void loadCart()}>Обновить</button></div><p>{cart.items.length ? `Позиций: ${cart.items.length}` : 'Корзина пока пуста'}</p>{cart.cart_url && cart.cart_url !== '#cart' && <a className="cart-link" href={cart.cart_url} target="_blank" rel="noreferrer">Открыть корзину ↗</a>}</section>}
+      {cart && <section className="cart-panel" id="cart"><div className="section-title"><h2>Корзина</h2><button className="cart-refresh" onClick={() => void loadCart()}>Обновить</button></div>{cart.items.length ? <ul className="cart-items">{cart.items.map(item => { const known = messages.flatMap(message => message.products ?? []).find(product => String(product.id) === item.product_id); return <li key={item.product_id}>{known?.name ?? `Товар ${item.product_id}`} — {item.quantity} шт.{known ? ` · ${money(known.price * item.quantity)}` : ''}{item.city ? ` · ${item.city}` : ''}</li>; })}</ul> : <p>Корзина пока пуста</p>}<p className="chat-footer">Демокорзина прототипа: заказ не оформляется, товар не резервируется.</p>{cart.cart_url && (cart.cart_url.startsWith('#') ? <a className="cart-link" href={cart.cart_url}>Перейти к корзине ↓</a> : <a className="cart-link" href={cart.cart_url} target="_blank" rel="noreferrer">Открыть корзину ↗</a>)}</section>}
       {!messages.length && <section className="featured"><div className="section-title"><h2>Демо-каталог</h2><span>Синтетические данные ↙</span></div><div className="featured-grid">{catalog.slice(0, 2).map(product => <ProductCard key={product.id} product={product} onPrepare={prepare} pending={pending} onConfirm={confirm} confirming={confirming} />)}</div></section>}
       <footer>Данные синтетические и предназначены только для демонстрации. Корзина будет доступна после подключения бэкенда.</footer>
       </div>

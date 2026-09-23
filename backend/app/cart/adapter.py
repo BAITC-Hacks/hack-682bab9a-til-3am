@@ -42,8 +42,13 @@ class MockCartAdapter:
             if self.catalog.find_by_id(item.product_id) is None:
                 raise CartError(f"Товар {item.product_id} не найден")
             stock = self.inventory.get_stock(item.product_id, item.city)
-            if stock.available_quantity is None or item.quantity > stock.available_quantity:
-                raise CartError(f"Недостаточно остатка для товара {item.product_id}")
+            in_cart = self._in_cart(session_id, item.product_id)
+            if stock.available_quantity is None:
+                raise CartError(f"Остаток товара {item.product_id} не подтверждён")
+            if item.quantity + in_cart > stock.available_quantity:
+                raise CartError(
+                    f"Недостаточно остатка: доступно {stock.available_quantity} шт., в корзине уже {in_cart} шт."
+                )
             checked.append(item)
 
         confirmation = PendingConfirmation(
@@ -65,8 +70,11 @@ class MockCartAdapter:
         # Re-check stock immediately before mutating the cart.
         for item in confirmation.items:
             stock = self.inventory.get_stock(item.product_id, item.city)
-            if stock.available_quantity is None or item.quantity > stock.available_quantity:
-                raise CartError(f"Остаток изменился для товара {item.product_id}")
+            in_cart = self._in_cart(session_id, item.product_id)
+            if stock.available_quantity is None or item.quantity + in_cart > stock.available_quantity:
+                raise CartError(
+                    f"Недостаточно остатка: доступно {stock.available_quantity} шт., в корзине уже {in_cart} шт."
+                )
 
         cart = self._carts.setdefault(session_id, {})
         for item in confirmation.items:
@@ -80,9 +88,14 @@ class MockCartAdapter:
             )
         return self.get_cart(session_id)
 
+    def _in_cart(self, session_id: str, product_id: str) -> int:
+        existing = self._carts.get(session_id, {}).get(str(product_id))
+        return existing.quantity if existing else 0
+
     def get_cart(self, session_id: str) -> CartResult:
         return CartResult(
             session_id=session_id,
             items=list(self._carts.get(session_id, {}).values()),
-            cart_url=f"http://localhost:5173/cart/{session_id}",
+            # The demo cart lives in the chat page; the real site adapter returns ekt.kz's cart URL.
+            cart_url="#cart",
         )
