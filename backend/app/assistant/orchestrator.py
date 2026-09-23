@@ -30,23 +30,35 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
     only parses free-form text and rephrases the data-backed answer in the
     customer's language; numbers it writes are checked against the source.
     """
+    # Fast path first: deterministic understanding answers instantly. The LLM
+    # parses the message only when the deterministic parser found nothing, and
+    # rephrases only Kazakh answers, so free-tier latency does not slow every reply.
+    result = _handle(request, services, None)
+    language = _detect_language(request.text)
     client = NvidiaLLMClient.from_env()
-    parsed = None
-    if client is not None and request.text.strip():
+    if client is not None and request.text.strip() and _not_understood(result):
         history = [message.content for message in request.history if message.role == "user" and message.content != request.text]
         parsed = client.parse_request(request.text.strip(), history)
-    result = _handle(request, services, parsed)
+        if parsed is not None:
+            result = _handle(request, services, parsed)
+            language = parsed.language or language
     # The HTTP layer finalises the answer (cart checks) and then calls polish_answer.
-    result.language = (parsed.language if parsed else None) or _detect_language(request.text)
+    result.language = language
     return result
 
 
+def _not_understood(result: AssistantResult) -> bool:
+    # Nothing found at all (several matches is a valid answer, not a misunderstanding).
+    return result.clarification is not None and "product" in result.clarification.missing_fields and not result.products
+
+
 def polish_answer(user_text: str, answer: str, language: str | None = None) -> str:
-    """Rephrase a final, data-backed answer in the customer's language; fall back to the original."""
+    """Rephrase a final answer for Kazakh-speaking customers; Russian data answers are returned as is."""
+    language = language or _detect_language(user_text)
     client = NvidiaLLMClient.from_env()
-    if client is None or not answer:
+    if client is None or not answer or language != "kk":
         return answer
-    return client.polish_answer(user_text, answer, language or _detect_language(user_text)) or answer
+    return client.polish_answer(user_text, answer, language) or answer
 
 
 def _detect_language(text: str) -> str:
@@ -94,7 +106,9 @@ def _handle(request: AssistantRequest, services: AgentServices, parsed) -> Assis
             action=None,
         )
 
-    effective_city = request.city or _extract_city(text) or (parsed.city if parsed else None) or _history_city(request)
+    # LLM city names ("Астана") are mapped to warehouse names ("Нур-Султан"); unknown ones are ignored.
+    llm_city = _extract_city(parsed.city) if parsed and parsed.city else None
+    effective_city = request.city or _extract_city(text) or llm_city or _history_city(request)
     filters = SearchFilters(city=effective_city)
     hits = []
     if parsed and parsed.article:
@@ -116,7 +130,7 @@ def _handle(request: AssistantRequest, services: AgentServices, parsed) -> Assis
 
     if len(hits) > 1 and hits[0].score < 0.95:
         return AssistantResult(
-            answer=f"Нашёл несколько подходящих товаров ({min(len(hits), 5)}). Уточните, какой именно нужен — укажите артикул.",
+            answer=_options_answer(services, hits[:5], effective_city),
             products=hits[:5],
             evidence=[],
             clarification=Clarification(
@@ -290,6 +304,24 @@ def _certificate_answer(request: AssistantRequest, services: AgentServices, text
     )
 
 
+def _options_answer(services: AgentServices, hits: list[ProductHit], city: str | None) -> str:
+    lines = [f"Нашёл несколько подходящих товаров ({len(hits)}):"]
+    for hit in hits:
+        product = services.catalog.find_by_id(hit.product_id)
+        if product is None:
+            continue
+        stock = services.inventory.get_stock(product.id, city)
+        if stock.available_quantity is None:
+            availability = "наличие не уточнено"
+        elif stock.available_quantity == 0:
+            availability = "нет в наличии"
+        else:
+            availability = f"в наличии {stock.available_quantity} шт." + (f" ({city})" if city else "")
+        lines.append(f"• {product.name} — {_format_price(product.price)}, {availability}")
+    lines.append("Какой выбрать? Напишите артикул, например первое число из названия.")
+    return "\n".join(lines)
+
+
 def _format_price(value) -> str:
     if value is None:
         return "цена не указана"
@@ -368,14 +400,31 @@ def _parse_with_nvidia(text: str):
     return client.parse_request(text) if client is not None else None
 
 
+# Quantities written as words (Russian with a unit, Kazakh collective forms like "екеуін").
+_NUMBER_WORDS = [
+    (rf"(?<!\w){word}(?!\w)", value)
+    for words, value in (
+        (("одну штуку", "одна штука", "біреуін", "біреу", "бір дана"), 1),
+        (("две штуки", "два штуки", "пару", "екеуін", "екеуі", "екеу", "екі дана"), 2),
+        (("три штуки", "үшеуін", "үшеуі", "үшеу", "үш дана"), 3),
+        (("четыре штуки", "төртеуін", "төртеуі", "төрт дана"), 4),
+        (("пять штук", "бесеуін", "бесеуі", "бес дана"), 5),
+    )
+    for word in words
+]
+
+
 def _requested_quantity(text: str) -> int | None:
     import re
 
     lowered = text.casefold()
+    for pattern, value in _NUMBER_WORDS:
+        if re.search(pattern, lowered):
+            return value
     # A bare number may be an article (for example, 027228), so only treat
     # numbers as quantities when the wording gives us a quantity signal.
     patterns = (
-        r"\b(\d{1,3})\s*(?:шт|штук|штуки|единиц|товар(?:а|ов)?)\b",
+        r"\b(\d{1,3})\s*(?:шт|штук|штуки|единиц|товар(?:а|ов)?|дана)\b",
         r"\b(?:нужно|нужн(?:а|о)|количество|добавь|положи|возьми)\s+(\d{1,3})\b",
     )
     for pattern in patterns:

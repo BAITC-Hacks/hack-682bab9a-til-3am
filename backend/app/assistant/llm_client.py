@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -31,10 +32,16 @@ if load_dotenv is not None:
 
 logger = logging.getLogger(__name__)
 
+# Comma-separated: the next model is tried when one is overloaded (429/5xx) or retired (404).
 DEFAULT_MODELS = {
-    "generativelanguage.googleapis.com": "gemini-2.5-flash",
+    "generativelanguage.googleapis.com": "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.6-flash",
     "api.groq.com": "llama-3.3-70b-versatile",
 }
+# Gemini 3.x are thinking models; without this they spend the token budget on reasoning.
+DEFAULT_REASONING_EFFORT = {"generativelanguage.googleapis.com": "minimal"}
+
+# Models that returned 429/5xx are skipped until this time (monotonic seconds).
+_COOLDOWN: dict[str, float] = {}
 
 INTENTS = ("product", "add_to_cart", "confirm", "analog", "certificate", "faq", "greeting", "other")
 
@@ -52,11 +59,20 @@ class ParsedRequest:
 class NvidiaLLMClient:
     """Small OpenAI-compatible chat client with a bounded timeout."""
 
-    def __init__(self, base_url: str, model: str, api_key: str, timeout: float = 8.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout: float = 8.0,
+        reasoning_effort: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.model = model
+        self.models = [name.strip() for name in model.split(",") if name.strip()]
+        self.model = self.models[0] if self.models else model
         self.api_key = api_key
         self.timeout = timeout
+        self.reasoning_effort = reasoning_effort
 
     @classmethod
     def from_env(cls) -> NvidiaLLMClient | None:
@@ -67,37 +83,50 @@ class NvidiaLLMClient:
             model = next((name for host, name in DEFAULT_MODELS.items() if host in base_url), None)
         if not base_url or not model or not api_key:
             return None
-        return cls(base_url, model, api_key, timeout=float(os.getenv("LLM_TIMEOUT", "8")))
+        effort = os.getenv("LLM_REASONING_EFFORT") or next(
+            (value for host, value in DEFAULT_REASONING_EFFORT.items() if host in base_url), None
+        )
+        return cls(base_url, model, api_key, timeout=float(os.getenv("LLM_TIMEOUT", "5")), reasoning_effort=effort)
 
     def chat(self, messages: list[dict[str, str]], max_tokens: int = 400, temperature: float = 0.0) -> str | None:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": False,
-        }
-        request = Request(
-            f"{self.base_url}/chat/completions",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=self.timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
-            content = body["choices"][0]["message"]["content"]
-            return content if isinstance(content, str) else None
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:300] if hasattr(exc, "read") else ""
-            logger.warning("LLM request failed with HTTP %s: %s", exc.code, detail)
-        except URLError as exc:
-            logger.warning("LLM connection failed: %s", exc.reason)
-        except (TimeoutError, KeyError, IndexError, ValueError, json.JSONDecodeError) as exc:
-            logger.warning("LLM response could not be read (%s)", type(exc).__name__)
+        now = time.monotonic()
+        models = [model for model in self.models if _COOLDOWN.get(model, 0) <= now] or self.models[-1:]
+        for model in models:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": False,
+            }
+            if self.reasoning_effort:
+                payload["reasoning_effort"] = self.reasoning_effort
+            request = Request(
+                f"{self.base_url}/chat/completions",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            try:
+                with urlopen(request, timeout=self.timeout) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+                content = body["choices"][0]["message"]["content"]
+                return content if isinstance(content, str) else None
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", "replace")[:300] if hasattr(exc, "read") else ""
+                logger.warning("LLM %s failed with HTTP %s: %s", model, exc.code, detail)
+                if exc.code in (404, 429) or exc.code >= 500:
+                    _COOLDOWN[model] = time.monotonic() + (3600 if exc.code == 404 else 60)
+                    continue  # overloaded or retired model: try the next one
+                return None
+            except URLError as exc:
+                logger.warning("LLM connection failed: %s", exc.reason)
+            except (TimeoutError, KeyError, IndexError, ValueError, json.JSONDecodeError) as exc:
+                logger.warning("LLM response could not be read (%s)", type(exc).__name__)
+            return None
         return None
 
     def parse_request(self, text: str, history: list[str] | None = None) -> ParsedRequest | None:
@@ -148,7 +177,10 @@ class NvidiaLLMClient:
             "характеристики, города, артикулы, сроки и условия; все числа, артикулы и названия товаров "
             "переноси без изменений; сохрани предупреждения (⚠), пометки «демо»/«синтетический» и ссылки; "
             "не утверждай, что корзина изменилась, если этого нет в ответе системы; "
-            "не проси платёжные данные; не используй markdown-заголовки и таблицы, списки через «•» можно. "
+            "не проси платёжные данные; не используй markdown-заголовки и таблицы, списки через «•» можно; "
+            "не здоровайся, если клиент сам не поздоровался в этом сообщении; "
+            "название кнопки «Да, добавить» не переводи и не меняй; "
+            "технические значения (например «Автоматический выключатель», «Винтовое») можно оставить как есть. "
             "Верни только текст ответа."
         )
         user = f"Сообщение клиента: {user_text}\n\nОтвет системы:\n{answer}"
