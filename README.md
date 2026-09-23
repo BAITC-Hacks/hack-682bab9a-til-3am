@@ -27,9 +27,11 @@ python -m pip install -r backend/requirements.txt
 uvicorn app.main:app --app-dir backend --reload
 ```
 
-Для подключения NVIDIA скопируйте `backend/.env.example` в `.env` и заполните
-`NVIDIA_MODEL` и `NVIDIA_API_KEY`. Ключ не добавляйте в Git. Без этих переменных
-backend использует deterministic MVP fallback.
+LLM (необязательно): скопируйте `backend/.env.example` в `backend/.env` и укажите `LLM_API_KEY`.
+Рекомендуем Google Gemini: бесплатный ключ можно получить на https://aistudio.google.com/apikey, модель хорошо понимает казахский.
+Подойдёт любой OpenAI-совместимый провайдер (Groq, OpenRouter, NVIDIA). Ключ не добавляйте в Git.
+
+LLM только понимает свободный текст на русском и казахском (намерение, товар, количество, город, язык) и переформулирует готовый ответ на языке клиента. Все числа в ответе модели сверяются с ответом из данных: если модель изменила или добавила цифру, показывается исходный ответ. Без ключа, при ошибке или таймауте backend работает в детерминированном режиме.
 
 Frontend в отдельном терминале:
 

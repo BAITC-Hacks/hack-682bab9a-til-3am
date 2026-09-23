@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Protocol
 
 from .contracts import (
@@ -25,9 +26,34 @@ class AssistantHandler(Protocol):
 def handle_message(request: AssistantRequest, services: AgentServices) -> AssistantResult:
     """Process one message using read-only backend services.
 
-    Deterministic baseline: facts (price, stock, specs) always come from the
-    catalog; the optional NVIDIA adapter only helps to parse the request.
+    Facts (price, stock, specs) always come from the catalog. The optional LLM
+    only parses free-form text and rephrases the data-backed answer in the
+    customer's language; numbers it writes are checked against the source.
     """
+    client = NvidiaLLMClient.from_env()
+    parsed = None
+    if client is not None and request.text.strip():
+        history = [message.content for message in request.history if message.role == "user" and message.content != request.text]
+        parsed = client.parse_request(request.text.strip(), history)
+    result = _handle(request, services, parsed)
+    # The HTTP layer finalises the answer (cart checks) and then calls polish_answer.
+    result.language = (parsed.language if parsed else None) or _detect_language(request.text)
+    return result
+
+
+def polish_answer(user_text: str, answer: str, language: str | None = None) -> str:
+    """Rephrase a final, data-backed answer in the customer's language; fall back to the original."""
+    client = NvidiaLLMClient.from_env()
+    if client is None or not answer:
+        return answer
+    return client.polish_answer(user_text, answer, language or _detect_language(user_text)) or answer
+
+
+def _detect_language(text: str) -> str:
+    return "kk" if re.search(r"[әғқңөұүһі]", text.casefold()) else "ru"
+
+
+def _handle(request: AssistantRequest, services: AgentServices, parsed) -> AssistantResult:
     text = request.text.strip()
     if not text:
         return AssistantResult(
@@ -38,11 +64,12 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
             action=None,
         )
 
-    if _is_certificate_question(text):
+    intent = parsed.intent if parsed else None
+    if intent == "certificate" or _is_certificate_question(text):
         return _certificate_answer(request, services, text)
 
-    if _is_faq_question(text):
-        entries = services.faq.search(text)
+    if intent == "faq" or _is_faq_question(text):
+        entries = services.faq.search(text) or services.faq.search(parsed.query or "" if parsed else "")
         if entries:
             parts = [entry.content for entry in entries]
             product = _context_product(request, services, text)
@@ -67,11 +94,15 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
             action=None,
         )
 
-    parsed = _parse_with_nvidia(text)
     effective_city = request.city or _extract_city(text) or (parsed.city if parsed else None) or _history_city(request)
-    search_text = parsed.article if parsed and parsed.article else text
     filters = SearchFilters(city=effective_city)
-    hits = _search_with_context(request, services, filters, search_text)
+    hits = []
+    if parsed and parsed.article:
+        hits = _search_with_context(request, services, filters, parsed.article)
+    if not hits and parsed and parsed.query:
+        hits = search_products(services.catalog, parsed.query, filters)
+    if not hits:
+        hits = _search_with_context(request, services, filters, text)
     if not hits:
         return AssistantResult(
             answer="Не нашёл товар по этому запросу. Укажите артикул или название (например, 027228, «автомат 160А» или «реле RM17»).",
@@ -112,7 +143,7 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
 
     products = [hit]
     out_of_stock = stock.available_quantity == 0
-    if out_of_stock or wants_analog(text):
+    if out_of_stock or intent == "analog" or wants_analog(text):
         all_products = getattr(services.catalog, "all_products", None)
         analogs = find_analogs(product, all_products() if all_products else [], services.inventory, effective_city)
         if analogs:
@@ -125,11 +156,11 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
             products.extend(analogs)
         else:
             answer += "\n\nПодходящих аналогов с подтверждённым наличием в текущих данных нет — менеджер подберёт замену."
-        if out_of_stock or not _wants_add(text):
+        if out_of_stock or not (intent == "add_to_cart" or _wants_add(text)):
             return AssistantResult(answer=answer, products=products, evidence=evidence, clarification=None, action=None)
 
     quantity = parsed.quantity if parsed and parsed.quantity is not None else _requested_quantity(text)
-    wants_add = _wants_add(text)
+    wants_add = intent == "add_to_cart" or _wants_add(text)
     action = None
     clarification = None
     if wants_add or quantity is not None:
@@ -234,7 +265,7 @@ def _context_product(request: AssistantRequest, services: AgentServices, text: s
 
 def _is_certificate_question(text: str) -> bool:
     lowered = text.casefold()
-    return any(token in lowered for token in ("сертификат", "декларац", "паспорт изделия", "ст-кз", "ст кз"))
+    return any(token in lowered for token in ("сертификат", "декларац", "паспорт изделия", "ст-кз", "ст кз", "куәлік"))
 
 
 def _certificate_answer(request: AssistantRequest, services: AgentServices, text: str) -> AssistantResult:
@@ -324,12 +355,12 @@ def _search_with_context(
 
 def _can_use_history(text: str) -> bool:
     lowered = text.casefold()
-    return any(token in lowered for token in ("добав", "корзин", "налич", "остат", "сколько", "количеств", "аналог", "замен", "похож", "характерист", "цена", "стоит", "шт")) or _extract_city(text) is not None
+    return any(token in lowered for token in ("добав", "корзин", "налич", "остат", "сколько", "количеств", "аналог", "замен", "похож", "характерист", "цена", "стоит", "шт", "бар ма", "қанша", "баға", "дана", "қос", "балама", "себет", "сал", "алам", "керек", "сертификат", "куәлік")) or _extract_city(text) is not None
 
 
 def _is_faq_question(text: str) -> bool:
     lowered = text.casefold()
-    return any(token in lowered for token in ("оплат", "достав", "гарант", "самовывоз", "минимальн", "партия", "партию", "кратност", "возврат", "условия покупки", "условия заказа"))
+    return any(token in lowered for token in ("оплат", "достав", "гарант", "самовывоз", "минимальн", "партия", "партию", "кратност", "возврат", "условия покупки", "условия заказа", "жеткіз", "төле", "төлем", "ақы", "қайтар", "кепілдік", "ең аз"))
 
 
 def _parse_with_nvidia(text: str):
@@ -362,7 +393,7 @@ def _requested_quantity(text: str) -> int | None:
 
 def _wants_add(text: str) -> bool:
     lowered = text.casefold()
-    return any(word in lowered for word in ("добавь", "добавить", "положи", "в корзину"))
+    return any(word in lowered for word in ("добавь", "добавить", "положи", "в корзину", "қос", "себет"))
 
 
 class UnconfiguredAssistant:

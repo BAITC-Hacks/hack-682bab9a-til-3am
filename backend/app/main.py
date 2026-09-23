@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from app.catalog import catalog
 from app.assistant.contracts import AgentServices, AssistantRequest, CartItem, Message
-from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant, resolve_city
+from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant, polish_answer, resolve_city
 from app.cart.adapter import CartError, MockCartAdapter
 from app.faq import FixtureFAQRepository
 from app.inventory import FixtureInventoryRepository
@@ -42,7 +42,7 @@ sessions: dict[str, list[str]] = {}
 latest_confirmation: dict[str, str] = {}
 CONFIRM_RE = re.compile(
     r"^(да|ага|ок|окей|конечно|подтверждаю|добавь|добавьте|добавляй|иә|иа|қос)"
-    r"([\s,!.-]*(да|добавь|добавьте|добавить|добавляй|подтверждаю|в корзину|пожалуйста|иә|қос))*[\s!.]*$"
+    r"([\s,!.-]*(да|добавь|добавьте|добавить|добавляй|подтверждаю|в корзину|пожалуйста|иә|қос|қосыңыз|қосыңызшы|қосу|себетке))*[\s!.]*$"
 )
 inventory = FixtureInventoryRepository(catalog)
 faq = FixtureFAQRepository()
@@ -136,7 +136,9 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     sessions[session_id] = sessions[session_id][-10:]
 
     if CONFIRM_RE.match(message.casefold()):
-        return _confirm_by_text(session_id)
+        response = _confirm_by_text(session_id)
+        response.answer = polish_answer(message, response.answer)
+        return response
 
     assistant_request = AssistantRequest(
         text=message,
@@ -184,7 +186,7 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
             answer = answer.split("\n\nПодготовил добавление")[0] + f"\n\nДобавить не получится: {str(error).rstrip('.')}. Укажите меньшее количество."
 
     return MessageResponse(
-        answer=answer,
+        answer=polish_answer(message, answer, getattr(result, "language", None)),
         products=cards,
         pending_confirmation=pending_confirmation,
     )

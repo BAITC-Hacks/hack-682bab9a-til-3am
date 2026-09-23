@@ -124,4 +124,4 @@ def find_analogs(
 
 def wants_analog(text: str) -> bool:
     lowered = text.casefold()
-    return any(token in lowered for token in ("аналог", "замен", "похож", "вместо", "альтернатив"))
+    return any(token in lowered for token in ("аналог", "замен", "похож", "вместо", "альтернатив", "балама", "ұқсас", "орнына"))
