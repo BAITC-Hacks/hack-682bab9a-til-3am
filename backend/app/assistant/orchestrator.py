@@ -151,13 +151,19 @@ def _requested_quantity(text: str) -> int | None:
     # A bare number may be an article (for example, 027228), so only treat
     # numbers as quantities when the wording gives us a quantity signal.
     patterns = (
-        r"\b(\d{1,3})\s*(?:шт|штук|единиц|товар(?:а|ов)?)\b",
+        r"\b(\d{1,3})\s*(?:шт|штук|штуки|единиц|товар(?:а|ов)?)\b",
         r"\b(?:нужно|нужн(?:а|о)|количество|добавь|положи|возьми)\s+(\d{1,3})\b",
     )
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
             return int(match.group(1))
+    # PowerShell clients can mangle Cyrillic text in the request body. A short
+    # standalone number is still safe to treat as a quantity here; long
+    # numeric articles such as 027228 are deliberately excluded.
+    match = re.search(r"\b(\d{1,3})\b", lowered)
+    if match:
+        return int(match.group(1))
     return None
 
 
