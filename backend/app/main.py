@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.catalog import catalog
+from app.inventory import FixtureInventoryRepository
 
 
 app = FastAPI(title="ekt.kz Chat Assistant API", version="0.1.0")
@@ -39,13 +40,18 @@ class MessageRequest(BaseModel):
 
 
 class ProductCard(BaseModel):
-    id: str
+    id: int
     name: str
     article: str | None = None
     price: int | float | None = None
+    currency: str | None = None
     image: str | None = None
     url: str | None = None
-    has_details: bool
+    quantity: int | None = None
+    stores: list[dict[str, str | int]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    match_reason: str | None = None
+    data_source: str
 
 
 class MessageResponse(BaseModel):
@@ -82,8 +88,22 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     # Keep only a small in-memory context window; the first slice searches the current message.
     sessions[session_id] = sessions[session_id][-10:]
 
+    inventory = FixtureInventoryRepository(catalog)
     matches = catalog.search(message)
-    cards = [catalog.product_card(product) for product in matches]
+    cards = []
+    for product in matches:
+        stock = inventory.get_stock(product.id)
+        card = catalog.product_card(product)
+        card["quantity"] = stock.available_quantity
+        card["stores"] = [
+            {
+                "id": location.location_id,
+                "name": location.location_name,
+                "quantity": location.quantity,
+            }
+            for location in stock.locations
+        ]
+        cards.append(card)
     if cards:
         answer = f"Нашёл в тестовой выборке {len(cards)} товар(а). Цены и остатки нужно сверять с ekt.kz."
     else:
