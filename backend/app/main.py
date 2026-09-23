@@ -64,17 +64,23 @@ class ProductCard(BaseModel):
     data_source: str
 
 
-class MessageResponse(BaseModel):
-    answer: str
-    products: list[ProductCard]
-    pending_confirmation: None = None
-
-
 class CartItemRequest(BaseModel):
     product_id: str
     quantity: int = Field(gt=0)
     city: str | None = None
     location_id: str | None = None
+
+
+class PendingConfirmationResponse(BaseModel):
+    confirmation_id: str
+    items: list[CartItemRequest]
+    expires_at: datetime
+
+
+class MessageResponse(BaseModel):
+    answer: str
+    products: list[ProductCard]
+    pending_confirmation: PendingConfirmationResponse | None = None
 
 
 class ConfirmationResponse(BaseModel):
@@ -142,7 +148,26 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
             for location in stock.locations
         ]
         cards.append(card)
-    return MessageResponse(answer=result.answer, products=cards)
+
+    pending_confirmation = None
+    if result.action is not None and result.action.type == "add_to_cart":
+        try:
+            confirmation = cart.create_confirmation(session_id, result.action.items)
+            pending_confirmation = PendingConfirmationResponse(
+                confirmation_id=confirmation.confirmation_id,
+                items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
+                expires_at=confirmation.expires_at,
+            )
+        except CartError:
+            # A stale or incomplete proposal must not mutate the cart or expose
+            # a confirmation token. The assistant answer remains read-only.
+            pending_confirmation = None
+
+    return MessageResponse(
+        answer=result.answer,
+        products=cards,
+        pending_confirmation=pending_confirmation,
+    )
 
 
 @app.post(
