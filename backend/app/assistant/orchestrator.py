@@ -37,6 +37,22 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
             action=None,
         )
 
+    if _is_faq_question(text):
+        entries = services.faq.search(text)
+        if entries:
+            return AssistantResult(
+                answer="\n\n".join(entry.content for entry in entries),
+                products=[],
+                evidence=[Evidence("faq", entry.id, entry.content, "verified") for entry in entries],
+                action=None,
+            )
+        return AssistantResult(
+            answer="В утверждённой базе пока нет точных условий оплаты, доставки или сертификатов. Уточните это у менеджера EKT.",
+            products=[],
+            evidence=[Evidence("faq", "search", text, "unknown")],
+            action=None,
+        )
+
     parsed = _parse_with_nvidia(text)
     effective_city = request.city or (parsed.city if parsed else None)
     search_text = parsed.article if parsed and parsed.article else text
@@ -148,9 +164,19 @@ def _search_with_context(
         if not content or content == current or message.role != "user":
             continue
         hits = search_products(services.catalog, content, filters)
-        if hits:
+        if hits and _can_use_history(current):
             return hits
     return []
+
+
+def _can_use_history(text: str) -> bool:
+    lowered = text.casefold()
+    return any(token in lowered for token in ("добав", "корзин", "налич", "остат", "сколько", "количеств"))
+
+
+def _is_faq_question(text: str) -> bool:
+    lowered = text.casefold()
+    return any(token in lowered for token in ("оплат", "достав", "сертификат", "гарант"))
 
 
 def _parse_with_nvidia(text: str):
