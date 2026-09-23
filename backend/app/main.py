@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -10,6 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.catalog import catalog
+from app.assistant.contracts import AgentServices, AssistantRequest, Message
+from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant
+from app.faq import FixtureFAQRepository
 from app.inventory import FixtureInventoryRepository
 
 
@@ -29,6 +33,10 @@ app.add_middleware(
 
 # Prototype-only session state. Replace with the site's session mechanism or a shared store.
 sessions: dict[str, list[str]] = {}
+inventory = FixtureInventoryRepository(catalog)
+faq = FixtureFAQRepository()
+assistant_handler: AssistantHandler = UnconfiguredAssistant()
+agent_services = AgentServices(catalog=catalog, inventory=inventory, faq=faq)
 
 
 class CreateSessionResponse(BaseModel):
@@ -88,12 +96,21 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     # Keep only a small in-memory context window; the first slice searches the current message.
     sessions[session_id] = sessions[session_id][-10:]
 
-    inventory = FixtureInventoryRepository(catalog)
-    matches = catalog.search(message)
+    result = assistant_handler.handle_message(
+        AssistantRequest(
+            text=message,
+            history=[Message(role="user", content=item, created_at=datetime.now(timezone.utc)) for item in sessions[session_id]],
+        ),
+        agent_services,
+    )
     cards = []
-    for product in matches:
-        stock = inventory.get_stock(product.id)
+    for hit in result.products:
+        product = catalog.find_by_id(hit.product_id)
+        if product is None:
+            continue
+        stock = agent_services.inventory.get_stock(product.id)
         card = catalog.product_card(product)
+        card["match_reason"] = hit.reason
         card["quantity"] = stock.available_quantity
         card["stores"] = [
             {
@@ -104,9 +121,4 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
             for location in stock.locations
         ]
         cards.append(card)
-    if cards:
-        answer = f"Нашёл в тестовой выборке {len(cards)} товар(а). Цены и остатки нужно сверять с ekt.kz."
-    else:
-        answer = "В тестовой выборке не нашёл подходящий товар. Попробуйте указать артикул или часть названия."
-
-    return MessageResponse(answer=answer, products=cards)
+    return MessageResponse(answer=result.answer, products=cards)

@@ -8,17 +8,31 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .contracts import AssistantRequest, AssistantResult
+from .contracts import AgentServices, AssistantRequest, AssistantResult, ProductHit
 
 
 class AssistantHandler(Protocol):
-    def handle_message(self, request: AssistantRequest) -> AssistantResult: ...
+    def handle_message(self, request: AssistantRequest, services: AgentServices) -> AssistantResult: ...
 
 
 class UnconfiguredAssistant:
     """Explicit fallback until the NVIDIA-backed handler is configured."""
 
-    def handle_message(self, request: AssistantRequest) -> AssistantResult:
-        return AssistantResult(
-            answer="ИИ-агент пока не настроен. Можно выполнить поиск по артикулу или названию.",
+    def handle_message(self, request: AssistantRequest, services: AgentServices) -> AssistantResult:
+        """Deterministic fallback with the same contract as the real agent."""
+        products = services.catalog.search(request.text)
+        hits = [
+            ProductHit(
+                product_id=product.id,
+                score=1.0,
+                reason="Совпадение по артикулу или названию",
+                matched_attributes={},
+            )
+            for product in products
+        ]
+        answer = (
+            f"Нашёл в тестовой выборке {len(hits)} товар(а)."
+            if hits
+            else "В тестовой выборке не нашёл подходящий товар. Попробуйте указать артикул или часть названия."
         )
+        return AssistantResult(answer=answer, products=hits)

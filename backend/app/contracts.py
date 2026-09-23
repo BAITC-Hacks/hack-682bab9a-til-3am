@@ -167,3 +167,10 @@ class InventoryRepository(Protocol):
 
 class FAQRepository(Protocol):
     def search(self, query: str) -> list[FAQEntry]: ...
+
+
+@dataclass
+class AgentServices:
+    catalog: CatalogRepository
+    inventory: InventoryRepository
+    faq: FAQRepository
