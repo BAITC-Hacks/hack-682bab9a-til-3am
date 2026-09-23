@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
@@ -10,6 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.catalog import catalog
+from app.assistant.contracts import AgentServices, AssistantRequest, CartItem, Message
+from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant
+from app.cart.adapter import CartError, MockCartAdapter
+from app.faq import FixtureFAQRepository
+from app.inventory import FixtureInventoryRepository
 
 
 app = FastAPI(title="ekt.kz Chat Assistant API", version="0.1.0")
@@ -28,6 +34,11 @@ app.add_middleware(
 
 # Prototype-only session state. Replace with the site's session mechanism or a shared store.
 sessions: dict[str, list[str]] = {}
+inventory = FixtureInventoryRepository(catalog)
+faq = FixtureFAQRepository()
+assistant_handler: AssistantHandler = UnconfiguredAssistant()
+agent_services = AgentServices(catalog=catalog, inventory=inventory, faq=faq)
+cart = MockCartAdapter(catalog, inventory)
 
 
 class CreateSessionResponse(BaseModel):
@@ -39,19 +50,43 @@ class MessageRequest(BaseModel):
 
 
 class ProductCard(BaseModel):
-    id: str
+    id: int
     name: str
     article: str | None = None
     price: int | float | None = None
+    currency: str | None = None
     image: str | None = None
     url: str | None = None
-    has_details: bool
+    quantity: int | None = None
+    stores: list[dict[str, str | int]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    match_reason: str | None = None
+    data_source: str
 
 
 class MessageResponse(BaseModel):
     answer: str
     products: list[ProductCard]
     pending_confirmation: None = None
+
+
+class CartItemRequest(BaseModel):
+    product_id: str
+    quantity: int = Field(gt=0)
+    city: str | None = None
+    location_id: str | None = None
+
+
+class ConfirmationResponse(BaseModel):
+    confirmation_id: str
+    items: list[CartItemRequest]
+    expires_at: datetime
+
+
+class CartResponse(BaseModel):
+    session_id: str
+    items: list[CartItemRequest]
+    cart_url: str
 
 
 @app.get("/api/v1/health")
@@ -82,11 +117,80 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     # Keep only a small in-memory context window; the first slice searches the current message.
     sessions[session_id] = sessions[session_id][-10:]
 
-    matches = catalog.search(message)
-    cards = [catalog.product_card(product) for product in matches]
-    if cards:
-        answer = f"Нашёл в тестовой выборке {len(cards)} товар(а). Цены и остатки нужно сверять с ekt.kz."
-    else:
-        answer = "В тестовой выборке не нашёл подходящий товар. Попробуйте указать артикул или часть названия."
+    result = assistant_handler.handle_message(
+        AssistantRequest(
+            text=message,
+            history=[Message(role="user", content=item, created_at=datetime.now(timezone.utc)) for item in sessions[session_id]],
+        ),
+        agent_services,
+    )
+    cards = []
+    for hit in result.products:
+        product = catalog.find_by_id(hit.product_id)
+        if product is None:
+            continue
+        stock = agent_services.inventory.get_stock(product.id)
+        card = catalog.product_card(product)
+        card["match_reason"] = hit.reason
+        card["quantity"] = stock.available_quantity
+        card["stores"] = [
+            {
+                "id": location.location_id,
+                "name": location.location_name,
+                "quantity": location.quantity,
+            }
+            for location in stock.locations
+        ]
+        cards.append(card)
+    return MessageResponse(answer=result.answer, products=cards)
 
-    return MessageResponse(answer=answer, products=cards)
+
+@app.post(
+    "/api/v1/sessions/{session_id}/confirmations",
+    response_model=ConfirmationResponse,
+)
+def create_confirmation(session_id: str, request: list[CartItemRequest]) -> ConfirmationResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    try:
+        confirmation = cart.create_confirmation(
+            session_id,
+            [CartItem(**item.model_dump()) for item in request],
+        )
+    except CartError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return ConfirmationResponse(
+        confirmation_id=confirmation.confirmation_id,
+        items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
+        expires_at=confirmation.expires_at,
+    )
+
+
+@app.post(
+    "/api/v1/sessions/{session_id}/confirmations/{confirmation_id}/confirm",
+    response_model=CartResponse,
+)
+def confirm_cart(session_id: str, confirmation_id: str) -> CartResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    try:
+        result = cart.confirm(session_id, confirmation_id)
+    except CartError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return CartResponse(
+        session_id=result.session_id,
+        items=[CartItemRequest(**item.__dict__) for item in result.items],
+        cart_url=result.cart_url or "",
+    )
+
+
+@app.get("/api/v1/sessions/{session_id}/cart", response_model=CartResponse)
+def get_cart(session_id: str) -> CartResponse:
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Сессия не найдена")
+    result = cart.get_cart(session_id)
+    return CartResponse(
+        session_id=result.session_id,
+        items=[CartItemRequest(**item.__dict__) for item in result.items],
+        cart_url=result.cart_url or "",
+    )
