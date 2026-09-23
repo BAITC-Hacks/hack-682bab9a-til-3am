@@ -7,7 +7,7 @@ the partner provides an approved FAQ dataset.
 
 from __future__ import annotations
 
-from app.contracts import FAQEntry
+from app.assistant.contracts import FAQEntry
 
 
 class FixtureFAQRepository:

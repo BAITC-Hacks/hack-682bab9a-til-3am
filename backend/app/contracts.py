@@ -115,6 +115,47 @@ class Clarification:
     options: list[str] = field(default_factory=list)
 
 
+@dataclass
+class AssistantRequest:
+    text: str
+    history: list[Message] = field(default_factory=list)
+    selected_products: list[str] = field(default_factory=list)
+    city: str | None = None
+    pending_confirmation: PendingConfirmation | None = None
+    attachments: list[AttachmentContent] = field(default_factory=list)
+
+
+@dataclass
+class ProductHit:
+    product_id: str
+    score: float
+    reason: str
+    matched_attributes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class Evidence:
+    source: str
+    field: str
+    value: str | None
+    status: FactStatus
+
+
+@dataclass
+class ActionProposal:
+    type: Literal["add_to_cart"]
+    items: list[CartItem]
+
+
+@dataclass
+class AssistantResult:
+    answer: str
+    products: list[ProductHit] = field(default_factory=list)
+    evidence: list[Evidence] = field(default_factory=list)
+    clarification: Clarification | None = None
+    action: ActionProposal | None = None
+
+
 class CatalogRepository(Protocol):
     def find_by_id(self, product_id: str) -> Product | None: ...
     def search(self, query: str, filters: SearchFilters | None = None) -> list[Product]: ...

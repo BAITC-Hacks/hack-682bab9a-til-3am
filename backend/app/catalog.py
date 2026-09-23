@@ -8,7 +8,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from app.contracts import AttributeValue, Product, SearchFilters
+from app.assistant.contracts import AttributeValue, Product, SearchFilters
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

@@ -179,7 +179,7 @@ backend/
     api/                 # HTTP и OpenAPI-схемы
     catalog/             # нормализация и CatalogRepository
     inventory/           # правила складов и InventoryRepository
-    assistant/           # оркестратор, LLM adapter, retrieval, grounding
+    assistant/           # contracts, оркестратор, LLM adapter, retrieval, grounding
     attachments/         # обработчики PDF/DOCX/XLSX/JPEG
     cart/                # интерфейс CartAdapter и реализации mock/ekt
     faq/                 # утверждённые ответы об условиях покупки

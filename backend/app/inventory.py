@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.catalog import Catalog
-from app.contracts import StockInfo, StockLocation
+from app.assistant.contracts import StockInfo, StockLocation
 
 
 class FixtureInventoryRepository:
