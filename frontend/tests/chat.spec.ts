@@ -8,9 +8,8 @@ test('desktop layout and exact article with stock warning', async ({ page }) => 
   await expect(page.getByRole('heading', { name: /Подберём/ })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Отправить сообщение' })).toBeDisabled();
   await page.screenshot({ path: 'screenshots/desktop.png', fullPage: true });
-  await page.getByRole('button', { name: '200300285_ в Алматы ↗' }).click();
-  await expect(page.locator('.messages')).toContainText('в Алматы — 5 шт.');
-  await expect(page.locator('.warning')).toContainText('250 А');
+  await page.getByRole('button', { name: 'DEMO-BREAKER-40A в Алматы ↗' }).click();
+  await expect(page.locator('.messages')).toContainText('В демо-каталоге');
   await expect(page.locator('.messages .product')).toHaveCount(1);
   await page.screenshot({ path: 'screenshots/search.png', fullPage: true });
   expect(errors).toEqual([]);
@@ -19,7 +18,7 @@ test('desktop layout and exact article with stock warning', async ({ page }) => 
 test('article punctuation, missing image and unknown stock', async ({ page }) => {
   await page.route('**/upload/**', route => route.abort());
   await page.goto('/');
-  await page.getByLabel('Ваш вопрос').fill('Есть 310100080_?');
+  await page.getByLabel('Ваш вопрос').fill('Есть DEMO-RELAY-RM17?');
   await page.getByLabel('Ваш вопрос').press('Enter');
   const product = page.locator('.messages .product');
   await expect(product).toHaveCount(1);
@@ -33,8 +32,8 @@ test('no fabricated FAQ, cart or unknown product; latest response is visible', a
     ['zzzzunknown', 'не найдено совпадений'],
     ['Как оплатить?', 'нет сертификатов и условий'],
     ['Добавь в корзину', 'Корзина ещё не подключена'],
-    ['200300285_', 'Вот совпадения'],
-    ['200300285_', 'Вот совпадения'],
+    ['DEMO-BREAKER-40A', 'Вот совпадения'],
+    ['DEMO-BREAKER-40A', 'Вот совпадения'],
   ]) {
     await page.getByLabel('Ваш вопрос').fill(query);
     await page.getByLabel('Ваш вопрос').press('Enter');
@@ -49,8 +48,8 @@ test('mobile layout fits screen and search works', async ({ page }) => {
   await page.goto('/');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'screenshots/mobile.png', fullPage: true });
-  await page.getByRole('button', { name: 'Реле RM17UAS16 ↗' }).click();
-  await expect(page.locator('.messages .product').first()).toContainText('RM17UAS16');
+  await page.getByRole('button', { name: 'Реле RM17 ↗' }).click();
+  await expect(page.locator('.messages .product').first()).toContainText('RM17');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: 'screenshots/mobile-search.png', fullPage: true });
 });

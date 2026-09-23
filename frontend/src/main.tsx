@@ -5,7 +5,7 @@ import type { Product } from './types';
 import './style.css';
 
 type Message = { role: 'user' | 'assistant'; text: string; products?: Product[]; warnings?: string[] };
-const examples = ['200300285_ в Алматы', 'Автомат Legrand 40А', 'Реле RM17UAS16'];
+const examples = ['DEMO-BREAKER-40A в Алматы', 'Автомат 40А', 'Реле RM17'];
 const money = (value: number) => new Intl.NumberFormat('ru-KZ').format(value) + ' ₸';
 
 function ProductCard({ product }: { product: Product }) {
@@ -13,7 +13,7 @@ function ProductCard({ product }: { product: Product }) {
   return <article className="product">
     <div className="product-image">{product.image && !broken ? <img src={product.image} alt={product.name} onError={() => setBroken(true)} /> : <span>Нет фото</span>}</div>
     <div className="product-info"><span className="article">Арт. {product.article}</span><h3>{product.name}</h3>
-      <p className="stock">{product.quantity === null ? 'Наличие не уточнено' : `${product.quantity} шт. по выгрузке`}</p>
+      <p className="stock">{product.quantity === null ? 'Наличие не уточнено' : `${product.quantity} шт. в демо`}</p>
       <div className="product-bottom"><strong>{money(product.price)}</strong>{product.url && <a href={product.url} target="_blank" rel="noreferrer">На сайт ↗</a>}</div>
     </div>
   </article>;
@@ -48,7 +48,7 @@ function App() {
     </aside>
     <main><header><div><span className="breadcrumb">Каталог /</span> AI-консультант</div><span className="mode">{live ? 'API подключается' : 'Демо · без LLM'}</span></header>
       <div className="content"><section className="intro"><span className="eyebrow">МЕНЬШЕ ПОИСКА. БОЛЬШЕ ЯСНОСТИ.</span><h1>Подберём нужное<br/><span>вместе.</span></h1><p>Расскажите, что ищете. Поможем разобраться<br className="desktop-break"/> в электротехнике и найти товар в каталоге.</p></section>
-      <div className="stats"><span><strong>40</strong> товаров в выборке</span><span><strong>01</strong> карточка с остатками</span><span>Данные из выгрузки</span></div>
+      <div className="stats"><span><strong>{catalog.length}</strong> демо-товара</span><span><strong>01</strong> карточка с остатками</span><span>Синтетический fixture</span></div>
       <section className="chat" aria-label="Чат с консультантом"><div className="chat-heading"><div className="avatar">✦</div><div><h2>EKT Assistant</h2><p>Ваш помощник по электротехнике</p></div><span className="chat-badge">BETA</span></div>
         <div className="messages" ref={messagesRef} aria-live="polite" aria-busy={loading}>
           <div className="message assistant"><span className="message-label">EKT ASSISTANT</span><p>Здравствуйте! Укажите название или артикул товара. Я найду его в каталоге и покажу доступные сведения.</p><div className="suggestions">{examples.map(example => <button key={example} disabled={loading} onClick={() => submit(example)}>{example} ↗</button>)}</div></div>
@@ -56,11 +56,11 @@ function App() {
           {loading && <p className="loading" role="status">Ищем ответ…</p>}
           {error && <div className="error" role="alert">{error} <button disabled={loading} onClick={() => failed && submit(failed, true)}>Повторить</button></div>}
         </div>
-        <form onSubmit={event => { event.preventDefault(); void submit(input); }}><label className="sr-only" htmlFor="message">Ваш вопрос</label><input id="message" value={input} onChange={event => setInput(event.target.value)} placeholder="Например: есть ли 200300285_ в Алматы?" maxLength={2000}/><button className="send" type="submit" disabled={loading || !input.trim()} aria-label="Отправить сообщение">↑</button></form>
-        <p className="chat-footer">{live ? 'Ответы сервера по каталогу.' : 'Демонстрационный поиск по JSON, без генерации AI.'} Цены в KZT — допущение прототипа.</p>
+        <form onSubmit={event => { event.preventDefault(); void submit(input); }}><label className="sr-only" htmlFor="message">Ваш вопрос</label><input id="message" value={input} onChange={event => setInput(event.target.value)} placeholder="Например: есть ли DEMO-BREAKER-40A?" maxLength={2000}/><button className="send" type="submit" disabled={loading || !input.trim()} aria-label="Отправить сообщение">↑</button></form>
+        <p className="chat-footer">{live ? 'Ответы сервера по каталогу.' : 'Синтетический демонстрационный каталог, без генерации AI.'} Цены в KZT — допущение прототипа.</p>
       </section>
-      {!messages.length && <section className="featured"><div className="section-title"><h2>Из вашего каталога</h2><span>Реальные данные выгрузки ↙</span></div><div className="featured-grid">{[catalog.find(product => product.id === 515291)!, catalog[0]].map(product => <ProductCard key={product.id} product={product}/>)}</div></section>}
-      <footer>Сведения из выгрузки могут отличаться от актуальных. Корзина будет доступна после подключения бэкенда.</footer>
+      {!messages.length && <section className="featured"><div className="section-title"><h2>Демо-каталог</h2><span>Синтетические данные ↙</span></div><div className="featured-grid">{catalog.slice(0, 2).map(product => <ProductCard key={product.id} product={product}/>)}</div></section>}
+      <footer>Данные синтетические и предназначены только для демонстрации. Корзина будет доступна после подключения бэкенда.</footer>
       </div>
     </main>
   </div>;
