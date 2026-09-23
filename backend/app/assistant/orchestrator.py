@@ -37,7 +37,7 @@ def handle_message(request: AssistantRequest, services: AgentServices) -> Assist
         )
 
     filters = SearchFilters(city=request.city)
-    hits = search_products(services.catalog, text, filters)
+    hits = _search_with_context(request, services, filters)
     if not hits:
         return AssistantResult(
             answer="Не нашёл товар по этому запросу. Укажите артикул или название.",
@@ -122,6 +122,28 @@ def _build_product_answer(name: str, quantity: int | None, city: str | None) -> 
     return f"Товар: {name}. {availability}{location}"
 
 
+def _search_with_context(request: AssistantRequest, services: AgentServices, filters: SearchFilters) -> list[ProductHit]:
+    """Search the current message, then recover the last discussed product.
+
+    Follow-up messages such as ``Мне нужно 2 штуки`` intentionally contain no
+    article. The backend supplies the bounded history, so the agent can safely
+    resolve that reference without inventing a product.
+    """
+    current = request.text.strip()
+    hits = search_products(services.catalog, current, filters)
+    if hits:
+        return hits
+
+    for message in reversed(request.history):
+        content = message.content.strip()
+        if not content or content == current or message.role != "user":
+            continue
+        hits = search_products(services.catalog, content, filters)
+        if hits:
+            return hits
+    return []
+
+
 def _requested_quantity(text: str) -> int | None:
     import re
 
@@ -129,13 +151,19 @@ def _requested_quantity(text: str) -> int | None:
     # A bare number may be an article (for example, 027228), so only treat
     # numbers as quantities when the wording gives us a quantity signal.
     patterns = (
-        r"\b(\d{1,3})\s*(?:шт|штук|единиц|товар(?:а|ов)?)\b",
+        r"\b(\d{1,3})\s*(?:шт|штук|штуки|единиц|товар(?:а|ов)?)\b",
         r"\b(?:нужно|нужн(?:а|о)|количество|добавь|положи|возьми)\s+(\d{1,3})\b",
     )
     for pattern in patterns:
         match = re.search(pattern, lowered)
         if match:
             return int(match.group(1))
+    # PowerShell clients can mangle Cyrillic text in the request body. A short
+    # standalone number is still safe to treat as a quantity here; long
+    # numeric articles such as 027228 are deliberately excluded.
+    match = re.search(r"\b(\d{1,3})\b", lowered)
+    if match:
+        return int(match.group(1))
     return None
 
 
