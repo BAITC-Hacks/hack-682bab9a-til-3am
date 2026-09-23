@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.catalog import catalog
 from app.assistant.contracts import AgentServices, AssistantRequest, CartItem, Message
-from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant
+from app.assistant.orchestrator import AssistantHandler, UnconfiguredAssistant, resolve_city
 from app.cart.adapter import CartError, MockCartAdapter
 from app.faq import FixtureFAQRepository
 from app.inventory import FixtureInventoryRepository
@@ -126,19 +126,19 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
     # Keep only a small in-memory context window; the first slice searches the current message.
     sessions[session_id] = sessions[session_id][-10:]
 
-    result = assistant_handler.handle_message(
-        AssistantRequest(
-            text=message,
-            history=[Message(role="user", content=item, created_at=datetime.now(timezone.utc)) for item in sessions[session_id]],
-        ),
-        agent_services,
+    assistant_request = AssistantRequest(
+        text=message,
+        history=[Message(role="user", content=item, created_at=datetime.now(timezone.utc)) for item in sessions[session_id]],
     )
+    result = assistant_handler.handle_message(assistant_request, agent_services)
+    city = resolve_city(assistant_request)
+    answer = result.answer
     cards = []
     for hit in result.products:
         product = catalog.find_by_id(hit.product_id)
         if product is None:
             continue
-        stock = agent_services.inventory.get_stock(product.id)
+        stock = agent_services.inventory.get_stock(product.id, city)
         card = catalog.product_card(product)
         card["match_reason"] = hit.reason
         card["quantity"] = stock.available_quantity
@@ -164,13 +164,14 @@ def send_message(session_id: str, request: MessageRequest) -> MessageResponse:
                 items=[CartItemRequest(**item.__dict__) for item in confirmation.items],
                 expires_at=confirmation.expires_at,
             )
-        except CartError:
+        except CartError as error:
             # A stale or incomplete proposal must not mutate the cart or expose
-            # a confirmation token. The assistant answer remains read-only.
+            # a confirmation token. Replace the offer text with the reason.
             pending_confirmation = None
+            answer = answer.split("\n\nПодготовил добавление")[0] + f"\n\nДобавить не получится: {str(error).rstrip('.')}. Укажите меньшее количество."
 
     return MessageResponse(
-        answer=result.answer,
+        answer=answer,
         products=cards,
         pending_confirmation=pending_confirmation,
     )

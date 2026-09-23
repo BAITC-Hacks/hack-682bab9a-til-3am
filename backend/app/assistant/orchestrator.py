@@ -204,6 +204,11 @@ def _extract_city(text: str) -> str | None:
     return next((city for token, city in _CITIES.items() if token in lowered), None)
 
 
+def resolve_city(request: AssistantRequest) -> str | None:
+    """City used for stock in this turn; the HTTP layer uses it for product cards."""
+    return request.city or _extract_city(request.text) or _history_city(request)
+
+
 def _history_city(request: AssistantRequest) -> str | None:
     for message in reversed(request.history):
         if message.role == "user" and message.content.strip() != request.text.strip():
